@@ -1,0 +1,46 @@
+/* LTR */
+@font-face {
+  font-family: "Poppins-Black";
+  src        : url("../../assets/fonts/Poppins-Black.ttf");
+}
+
+@font-face {
+  font-family: "Poppins-Bold";
+  src        : url("../../assets/fonts/Poppins-Bold.ttf");
+}
+
+@font-face {
+  font-family: "Poppins-Medium";
+  src        : url("../../assets/fonts/Poppins-Medium.ttf");
+}
+
+@font-face {
+  font-family: "Poppins-SemiBold";
+  src        : url("../../assets/fonts/Poppins-SemiBold.ttf");
+}
+
+@font-face {
+  font-family: "Poppins-Regular";
+  src        : url("../../assets/fonts/Poppins-Regular.ttf");
+}
+
+/* RTL */
+@font-face {
+  font-family: "Peyda-Black";
+  src        : url("../../assets/fonts/Peyda-Black.woff2");
+}
+
+@font-face {
+  font-family: "Peyda-Bold";
+  src        : url("../../assets/fonts/Peyda-Bold.woff2");
+}
+
+@font-face {
+  font-family: "Peyda-SemiBold";
+  src        : url("../../assets/fonts/Peyda-SemiBold.woff2");
+}
+
+@font-face {
+  font-family: "Peyda-Extrabold";
+  src        : url("../../assets/fonts/Peyda-ExtraBold.woff2");
+}

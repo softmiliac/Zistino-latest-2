@@ -1,0 +1,25 @@
+name: pandabar
+description: A fancy bottom navigation bar for pandas. Pandabar designed for new neumorphic design trend.
+version: 0.1.2
+homepage: https://github.com/kemalturk/panda-bar
+
+environment:
+  sdk: ">=2.12.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_svg: ^1.0.3
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter.
+flutter:
+

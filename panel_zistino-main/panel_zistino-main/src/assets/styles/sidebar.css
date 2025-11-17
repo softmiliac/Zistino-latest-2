@@ -1,0 +1,16 @@
+
+
+.side-navigation-panel-select-option:hover,
+.side-navigation-panel-select-option.side-navigation-panel-select-option-selected,
+.side-navigation-panel-select-inner-option:hover,
+.side-navigation-panel-select-inner-option.side-navigation-panel-select-inner-option-selected {
+    @apply !bg-[#fff] !text-primary !border-primary dark:!bg-[#32363f] dark:!text-primary dark:!border-primary
+}
+
+.side-navigation-panel-select-option,
+.side-navigation-panel-select-option,
+.side-navigation-panel-select-inner-option,
+.side-navigation-panel-select-inner-option{
+    @apply !bg-[#fff] !text-[#4b5563] dark:!bg-[#32363f] dark:!text-[#fff];
+    transition: all .2s ease-in-out;
+}

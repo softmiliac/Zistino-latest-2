@@ -1,0 +1,7 @@
+{
+  "name": "EcoCollect: Smart Waste Management",
+  "description": "A comprehensive web application for scheduling waste collection, earning rewards, and learning about proper recycling. This app connects users with drivers for efficient waste pickup, features an in-app store to redeem credits, and includes an AI-powered guide for sorting waste correctly.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

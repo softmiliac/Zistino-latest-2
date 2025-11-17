@@ -1,0 +1,25 @@
+const Map<String, String> faFA = {
+  'easy_pay':'Easy payments',
+  'easy_pay_part2':'Leave the repair your device to us Leave the repair of your device',
+  'find_product_you_want':'Find the product you want',
+  'more': 'more',
+  'search': 'Search',
+  'popular_products':'Popular Products',
+  'new_products':'New Products',
+  'products':'Products',
+  'plant_bank':'Plant bank',
+  'category':'Category',
+  'click_see_more':'click to see more detail',
+  'checkEmail': "Check your inbox",
+  'enter_verification_code': "Enter the verification code sent to the email below.",
+  'plsFill': 'Please fill in the field.',
+  'error': 'Error',
+  'success': 'Success',
+  'no_internet_txt': 'Please check your connection',
+  'success_sign_up': 'ثبت نام با موفقیت انجام شد',
+  'reset_success': 'تغییر رمز با موفقیت انجام شد',
+  'code_sent': 'کد ارسال شد',
+  'choose_country': 'کشور خود را انتخاب کنید',
+
+
+};

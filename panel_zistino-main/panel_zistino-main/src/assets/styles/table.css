@@ -1,0 +1,95 @@
+.ant-table-content table , .ant-table {
+  border-collapse: separate !important;
+  border-spacing: 0 1em !important;
+  background-color: transparent !important;
+  @apply rtl:text-right;
+}
+
+.ant-table-content table tbody tr td,
+.ant-table-content table thead tr th {
+  @apply bg-secondary-light-100 dark:bg-secondary-dark-100 dark:!text-[#fff] border-0;
+}
+
+.ant-table-content table tbody tr:hover td{
+  cursor: pointer;
+  @apply bg-secondary-light-100 dark:!bg-secondary-dark-100 opacity-80 dark:!text-[#fff] border-0;
+}
+
+.ant-table-content table thead tr td {
+  @apply bg-transparent;
+}
+
+.ant-table-content table tbody tr th:nth-child(1),
+.ant-table-content table tbody tr td:nth-child(1) {
+  @apply ltr:rounded-l-xl rtl:rounded-r-xl;
+}
+
+.ant-table-content table tbody tr td:last-child {
+  @apply ltr:rounded-r-xl rtl:rounded-l-xl;
+}
+
+.table-normal :where(th, td) {
+  padding: 0.36rem 1.5rem !important;
+}
+
+.ant-table-content table tr {
+  height: 59.5px;
+}
+
+.ant-pagination-item {
+  font-size: 16px;
+  width: 28px !important;
+  height: 28px !important;
+}
+
+.ant-pagination li, a {
+  @apply !text-black dark:!text-white;
+}
+
+.ant-pagination-item a:hover {
+  @apply !text-primary;
+}
+
+.ant-pagination-item-active {
+  @apply !bg-primary;
+  @apply !border-primary;
+  border-radius: 5px !important;
+}
+
+.ant-pagination-item-active a {
+ @apply !text-white;
+}
+
+.ant-pagination-item-active a:hover {
+  @apply !text-white;
+}
+
+.anticon {
+  @apply !text-black dark:!text-white;
+  font-size: 16px;
+}
+
+.anticon:hover {
+  @apply !text-primary;
+
+}
+
+
+.ant-tag, .ant-tag a, .ant-tag a:hover {
+  @apply dark:!text-[#fff];
+}
+
+.ant-tag-checkable:not(.ant-tag-checkable-checked):hover {
+  color: #76AD00 !important;
+}
+
+.ant-tag-checkable:active {
+  background-color: #76AD00!important;
+}
+.ant-tag-checkable-checked {
+  background-color: #76AD00!important;
+}
+
+.ant-select-single.ant-select-show-arrow .ant-select-selection-item, .ant-select-single.ant-select-show-arrow .ant-select-selection-placeholder{
+  padding-right: 25px !important;
+}
