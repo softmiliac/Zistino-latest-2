@@ -243,7 +243,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8080",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
-    "https://zistino-latest.onrender.com",
+    "https://zistino-latest-2.onrender.com",
 ]
 
 # Allow all origins in development (for Swagger UI and testing)
@@ -252,7 +252,7 @@ if DEBUG:
 else:
     CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = [ 
-       "https://zistino-latest.onrender.com",  
+       "https://zistino-latest-2.onrender.com",  
    ]
 
 CORS_ALLOW_CREDENTIALS = True
