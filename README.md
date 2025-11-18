@@ -102,4 +102,3 @@ Root repo does not specify a license; refer to individual package license files 
 
 ---
 
-> This README is bot-generated from project docs, backend API references, and code annotation.
