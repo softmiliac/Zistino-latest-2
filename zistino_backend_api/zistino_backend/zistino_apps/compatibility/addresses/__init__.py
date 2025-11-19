@@ -1,2 +1,0 @@
-# Addresses compatibility endpoints module
-

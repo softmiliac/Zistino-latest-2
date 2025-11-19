@@ -1,2 +1,0 @@
-# Personal compatibility module
-

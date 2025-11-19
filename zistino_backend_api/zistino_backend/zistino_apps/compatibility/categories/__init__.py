@@ -1,2 +1,0 @@
-# Categories compatibility module
-

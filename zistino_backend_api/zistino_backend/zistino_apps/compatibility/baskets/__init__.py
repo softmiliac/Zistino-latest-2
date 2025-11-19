@@ -1,2 +1,0 @@
-# Baskets compatibility endpoints module
-

@@ -1,2 +1,0 @@
-# ContactUsMessages compatibility layer
-

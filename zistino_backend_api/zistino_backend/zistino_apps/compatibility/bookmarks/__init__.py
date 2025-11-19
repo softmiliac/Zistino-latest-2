@@ -1,2 +1,0 @@
-# Bookmarks compatibility module
-

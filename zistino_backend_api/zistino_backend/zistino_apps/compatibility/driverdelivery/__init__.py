@@ -1,2 +1,0 @@
-# DriverDelivery compatibility layer
-

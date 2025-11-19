@@ -1,2 +1,0 @@
-# Testimonials compatibility layer
-

@@ -1,2 +1,0 @@
-# Faqs compatibility module
-

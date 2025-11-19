@@ -1,2 +1,0 @@
-# MapZone compatibility module
-

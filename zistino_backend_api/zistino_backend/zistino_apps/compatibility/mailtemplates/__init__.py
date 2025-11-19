@@ -1,2 +1,0 @@
-# MailTemplates compatibility module
-

@@ -1,2 +1,0 @@
-# BlogCategories compatibility module
-
