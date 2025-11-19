@@ -1,9 +1,10 @@
 """
-SMS Service for sending SMS notifications via Payamak BaseServiceNumber (priority) or MeliPayamak (fallback).
+SMS Service Module
+Handles SMS sending via Payamak BaseServiceNumber and MeliPayamak APIs.
 """
 import logging
-import requests
 import json
+import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -11,42 +12,53 @@ logger = logging.getLogger(__name__)
 
 def _normalize_phone_number(phone_number):
     """
-    Normalize phone number to Iranian format (09123456789).
+    Normalize phone number to standard format (09123456789).
     
     Args:
-        phone_number (str): Phone number in any format
+        phone_number (str): Phone number in various formats
         
     Returns:
-        str: Normalized phone number (09123456789 format)
+        str: Normalized phone number (09123456789)
     """
-    normalized = phone_number.strip()
+    if not phone_number:
+        return None
+    
+    # Remove all spaces, dashes, and parentheses
+    normalized = phone_number.strip().replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+    
+    # Remove +98 prefix if present
     if normalized.startswith('+98'):
-        normalized = '0' + normalized[3:]  # +989123456789 -> 09123456789
-    elif normalized.startswith('98'):
-        normalized = '0' + normalized[2:]  # 989123456789 -> 09123456789
+        normalized = '0' + normalized[3:]
+    # Remove 98 prefix if present (without +)
+    elif normalized.startswith('98') and len(normalized) == 12:
+        normalized = '0' + normalized[2:]
+    # Ensure starts with 0
     elif not normalized.startswith('0'):
-        normalized = '0' + normalized  # 9123456789 -> 09123456789
+        normalized = '0' + normalized
+    
     return normalized
+
+
+def _normalize_phone_for_melipayamak(phone_number):
+    """
+    Normalize phone number for MeliPayamak API (09123456789 format).
+    
+    Args:
+        phone_number (str): Phone number in various formats
+        
+    Returns:
+        str: Normalized phone number (09123456789)
+    """
+    return _normalize_phone_number(phone_number)
 
 
 def _send_sms_melipayamak(phone_number, message):
     """
-    Send SMS via MeliPayamak REST API.
-    
-    MeliPayamak REST API endpoint: https://rest.payamak-panel.com/api/SendSMS/SendSMS
-    This method is used for sending SMS to a maximum of 100 recipients per call.
-    
-    According to MeliPayamak documentation:
-    - username: Your account username (phone number) in the system
-    - password: API key from settings and web service in developer menu
-    - to: Recipient number(s), separated by comma (،) for multiple recipients
-    - from: Dedicated sender number
-    - text: SMS text content
-    - isFlash: Optional boolean to send as flash message
+    Send SMS via MeliPayamak REST API (free-form messages).
     
     Args:
         phone_number (str): Phone number to send SMS to
-        message (str): Message content
+        message (str): SMS message content
         
     Returns:
         tuple: (success: bool, error_message: str or None)
@@ -56,6 +68,10 @@ def _send_sms_melipayamak(phone_number, message):
         api_key = settings.MELIPAYAMAK_API_KEY  # API Key is used as password
         api_url = settings.MELIPAYAMAK_API_URL
         sender = settings.MELIPAYAMAK_SENDER
+        
+        # Use dedicated number 30008666009664 (confirmed working)
+        if not sender or sender in ['21700077', '300086669664', '']:
+            sender = '30008666009664'
         
         if not username or not api_key:
             error_msg = "MeliPayamak credentials not configured. Please set MELIPAYAMAK_USERNAME and MELIPAYAMAK_API_KEY in settings."
@@ -71,18 +87,15 @@ def _send_sms_melipayamak(phone_number, message):
         normalized_phone = _normalize_phone_number(phone_number)
         
         # MeliPayamak REST API endpoint
-        # Default: https://rest.payamak-panel.com/api/SendSMS/SendSMS
         send_endpoint = api_url if api_url else "https://rest.payamak-panel.com/api/SendSMS/SendSMS"
         
-        # Prepare payload according to MeliPayamak REST API documentation
-        # Note: The API accepts form-encoded data (application/x-www-form-urlencoded)
+        # Prepare payload
         payload = {
-            'username': username,  # Phone number (e.g., 09155009664)
-            'password': api_key,   # API Key (e.g., f2b89fd9-5633-4623-92c1-b3a896639f76)
-            'to': normalized_phone,  # Recipient number (e.g., 09155309685)
-            'from': sender,          # Sender number (e.g., 21700077)
-            'text': message          # SMS text content
-            # isFlash is optional, not included by default
+            'username': username,
+            'password': api_key,
+            'to': normalized_phone,
+            'from': sender,
+            'text': message
         }
         
         headers = {
@@ -90,81 +103,131 @@ def _send_sms_melipayamak(phone_number, message):
             'Accept': 'application/json, text/plain, */*'
         }
         
+        logger.info(f"=== MeliPayamak SMS Request ===")
         logger.info(f"Sending SMS via MeliPayamak REST API to {normalized_phone}")
         logger.info(f"Using endpoint: {send_endpoint}")
-        logger.info(f"Username: {username}, Sender: {sender}")
-        logger.debug(f"Payload: {payload}")
+        logger.info(f"Sender (from): {sender}")
+        logger.info(f"Message length: {len(message)} characters")
         
-        # Send POST request with form-encoded data
+        # Send POST request
         response = requests.post(
             send_endpoint,
-            data=payload,  # Use 'data' for form-encoded
+            data=payload,
             headers=headers,
             timeout=30
         )
         
         logger.info(f"MeliPayamak API Response Status: {response.status_code}")
-        logger.info(f"MeliPayamak API Response Text: {response.text[:500]}")
+        logger.info(f"MeliPayamak API Response Text (Full): {response.text}")
         
-        # Store raw response for debugging
         raw_response_text = response.text
         
         if response.status_code == 200:
             response_text = response.text.strip()
-            
-            # MeliPayamak REST API typically returns:
-            # - Success: Positive number (message ID) or JSON with status
-            # - Error: Negative number, error message, or JSON with error
             
             # Try to parse as JSON first
             try:
                 response_data = response.json()
                 logger.info(f"MeliPayamak API Response JSON: {json.dumps(response_data, indent=2, ensure_ascii=False)}")
                 
-                # Check for success indicators in JSON response
                 if isinstance(response_data, dict):
-                    # Common success fields
-                    status = (
-                        response_data.get('status') or
-                        response_data.get('Status') or
-                        response_data.get('RetStatus') or
-                        response_data.get('StrRetStatus')
-                    )
+                    ret_status = response_data.get('RetStatus')
+                    str_ret_status = response_data.get('StrRetStatus', '')
+                    value = response_data.get('Value', '')
                     
-                    # Check if status indicates success
-                    if isinstance(status, (int, float)) and status > 0:
-                        logger.info(f"SMS sent successfully via MeliPayamak to {normalized_phone}. Status: {status}")
-                        return True, None
-                    elif isinstance(status, str) and status.lower() in ['ok', 'success', 'true']:
-                        logger.info(f"SMS sent successfully via MeliPayamak to {normalized_phone}")
-                        return True, None
+                    logger.info(f"MeliPayamak Response - RetStatus: {ret_status}, StrRetStatus: {str_ret_status}, Value: {value}")
+                    
+                    if isinstance(ret_status, (int, float)):
+                        # Check StrRetStatus first - if it contains error keywords, it's an error
+                        if str_ret_status and any(keyword in str_ret_status.lower() for keyword in ['error', 'invalid', 'fail', 'خطا', 'نامعتبر']):
+                            error_msg = f"MeliPayamak API error (RetStatus: {ret_status}, StrRetStatus: {str_ret_status})"
+                            logger.error(f"❌ {error_msg}")
+                            return False, error_msg
+                        
+                        # Only RetStatus = 1 means success (according to MeliPayamak documentation)
+                        if ret_status == 1:
+                            logger.info(f"✅ SMS request accepted by MeliPayamak to {normalized_phone}. RetStatus: {ret_status}")
+                            return True, None
+                        elif ret_status == 9:
+                            error_msg = f"InvalidNumber (RetStatus: 9) - Phone number format is incorrect: {normalized_phone}"
+                            logger.error(f"❌ {error_msg}")
+                            return False, error_msg
+                        elif ret_status < 0:
+                            error_codes = {
+                                -1: "Invalid username or password",
+                                -2: "Insufficient credit",
+                                -3: "Invalid sender number",
+                                -4: "Invalid recipient number",
+                                -5: "Message is empty",
+                                -6: "Message too long",
+                                -7: "Invalid API key",
+                                -8: "IP not allowed",
+                                -9: "Account disabled",
+                                -10: "Daily limit exceeded"
+                            }
+                            error_msg = error_codes.get(ret_status, f"Unknown error code: {ret_status}")
+                            logger.error(f"❌ MeliPayamak API error (RetStatus: {ret_status}): {error_msg}")
+                            return False, f"API Error {ret_status}: {error_msg}"
+                        else:
+                            # RetStatus > 1 and != 9 means error (e.g., 35 = InvalidData)
+                            error_msg = f"MeliPayamak API error (RetStatus: {ret_status}, StrRetStatus: {str_ret_status})"
+                            logger.error(f"❌ {error_msg}")
+                            return False, error_msg
+                    elif str_ret_status:
+                        if str_ret_status.lower() in ['ok', 'success', 'موفق']:
+                            logger.info(f"✅ SMS sent successfully via MeliPayamak to {normalized_phone}")
+                            return True, None
+                        else:
+                            error_msg = f"MeliPayamak API error: {str_ret_status}"
+                            logger.error(f"❌ {error_msg}")
+                            return False, error_msg
                     else:
-                        error_msg = response_data.get('message') or response_data.get('Message') or str(response_data)
-                        logger.error(f"MeliPayamak API returned error: {error_msg}")
+                        error_msg = f"Unexpected response format: {response_data}"
+                        logger.error(f"❌ {error_msg}")
                         return False, f"API Error: {error_msg}"
                 else:
-                    # If response is not a dict, treat as success if status is 200
                     logger.info(f"SMS sent successfully via MeliPayamak to {normalized_phone}")
                     return True, None
                     
             except (ValueError, json.JSONDecodeError):
                 # Not JSON, treat as plain text
-                # Success: positive number (message ID)
-                # Error: negative number or error message
-                if response_text.isdigit():
-                    message_id = int(response_text)
-                    if message_id > 0:
-                        logger.info(f"SMS sent successfully via MeliPayamak to {normalized_phone}. Message ID: {message_id}")
+                logger.info(f"Response is not JSON, treating as plain text: '{response_text}'")
+                
+                try:
+                    response_value = int(response_text)
+                    if response_value > 0:
+                        logger.info(f"✅ SMS sent successfully via MeliPayamak to {normalized_phone}. Message ID: {response_value}")
+                        return True, None
+                    elif response_value < 0:
+                        error_codes = {
+                            -1: "Invalid username or password",
+                            -2: "Insufficient credit",
+                            -3: "Invalid sender number",
+                            -4: "Invalid recipient number",
+                            -5: "Message is empty",
+                            -6: "Message too long",
+                            -7: "Invalid API key",
+                            -8: "IP not allowed",
+                            -9: "Account disabled",
+                            -10: "Daily limit exceeded"
+                        }
+                        error_msg = error_codes.get(response_value, f"Unknown error code: {response_value}")
+                        logger.error(f"❌ MeliPayamak API returned error code: {response_value} - {error_msg}")
+                        return False, f"API Error {response_value}: {error_msg}"
+                    else:
+                        logger.warning(f"⚠️ MeliPayamak API returned 0 (unknown status) for {normalized_phone}")
+                        return False, "API returned 0 (unknown status - check MeliPayamak dashboard)"
+                except ValueError:
+                    response_lower = response_text.lower()
+                    if any(keyword in response_lower for keyword in ['error', 'fail', 'invalid', 'خطا', 'نامعتبر']):
+                        logger.error(f"❌ MeliPayamak API returned error: {response_text}")
+                        return False, f"API Error: {response_text}"
+                    elif 'ok' in response_lower or response_lower == 'success' or 'موفق' in response_text:
+                        logger.info(f"✅ SMS sent successfully via MeliPayamak to {normalized_phone}")
                         return True, None
                     else:
-                        logger.error(f"MeliPayamak API returned error code: {message_id}")
-                        return False, f"API Error: {message_id}"
-                elif 'ok' in response_text.lower() or response_text.lower() == 'success':
-                    logger.info(f"SMS sent successfully via MeliPayamak to {normalized_phone}")
-                    return True, None
-                else:
-                    logger.error(f"MeliPayamak API returned error: {response_text}")
-                    return False, f"API Error: {response_text}"
+                        logger.warning(f"⚠️ Unknown response format from MeliPayamak: {response_text}")
+                        return True, None
         else:
             error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
             logger.error(f"MeliPayamak API request failed: {error_msg}")
@@ -186,20 +249,12 @@ def send_payamak_base_service_sms(phone_number, text_code):
     """
     Send SMS via Payamak Panel BaseServiceNumber API (for OTP/service messages).
     
-    This is the same API used in the PHP code:
-    - Endpoint: https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber
-    - Uses form-encoded data (application/x-www-form-urlencoded)
-    - Phone number is normalized to 98XXXXXXXXXX format (removes leading 0, adds 98)
-    - Uses bodyId (pattern code) from settings
-    
     Args:
-        phone_number (str): Phone number to send SMS to (format: 09123456789 or +989123456789)
-        text_code (str): OTP or service code to send (e.g., "123456")
+        phone_number (str): Phone number to send SMS to
+        text_code (str): OTP or service code to send
         
     Returns:
         tuple: (success: bool, error_message: str or None, response_data: dict or None)
-               If success=True, error_message is None and response_data contains API response
-               If success=False, error_message contains the error details and response_data is None
     """
     try:
         username = settings.PAYAMAK_USERNAME
@@ -212,25 +267,23 @@ def send_payamak_base_service_sms(phone_number, text_code):
             logger.error(error_msg)
             return False, error_msg, None
         
-        # Normalize phone: remove leading 0, add 98 prefix (as per PHP code)
+        # Normalize phone: remove leading 0, add 98 prefix
         normalized_phone = phone_number.strip()
         if normalized_phone.startswith('0'):
-            normalized_phone = '98' + normalized_phone[1:]  # 09123456789 -> 98123456789
+            normalized_phone = '98' + normalized_phone[1:]
         elif normalized_phone.startswith('+98'):
-            normalized_phone = '98' + normalized_phone[3:]  # +989123456789 -> 989123456789
+            normalized_phone = '98' + normalized_phone[3:]
         elif not normalized_phone.startswith('98'):
-            normalized_phone = '98' + normalized_phone  # 9123456789 -> 989123456789
+            normalized_phone = '98' + normalized_phone
         
-        # Default endpoint if not set
         send_endpoint = api_url if api_url else "https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber"
         
-        # Prepare form-encoded payload (as per PHP code)
         payload = {
             'username': username,
             'password': password,
-            'text': text_code,  # OTP/service code
+            'text': text_code,
             'to': normalized_phone,
-            'bodyId': body_id  # Pattern code
+            'bodyId': body_id
         }
         
         headers = {
@@ -240,27 +293,61 @@ def send_payamak_base_service_sms(phone_number, text_code):
         logger.info(f"Sending SMS via Payamak BaseServiceNumber to {normalized_phone}")
         logger.info(f"Using endpoint: {send_endpoint}")
         logger.info(f"BodyId: {body_id}, Text: {text_code}")
-        logger.debug(f"Payload: {payload}")
         
-        # Send POST request with form-encoded data (verify=False to match PHP CURL settings)
         response = requests.post(
             send_endpoint,
-            data=payload,  # Form-encoded data
+            data=payload,
             headers=headers,
             timeout=30,
-            verify=False  # Match PHP CURL SSL settings
+            verify=False
         )
         
         logger.info(f"Payamak BaseServiceNumber Response Status: {response.status_code}")
         logger.info(f"Payamak BaseServiceNumber Response Text: {response.text[:500]}")
         
-        # Try to parse JSON response
         try:
-            response_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {'raw': response.text}
-        except:
+            response_data = response.json()
+        except (ValueError, json.JSONDecodeError):
             response_data = {'raw': response.text}
         
         if response.status_code == 200:
+            response_text = response.text.strip()
+            
+            try:
+                response_value = int(response_text)
+                if response_value < 0:
+                    error_msg = f"Payamak BaseServiceNumber returned error code: {response_value}"
+                    logger.error(f"Error sending to {normalized_phone}: {error_msg}")
+                    return False, error_msg, response_data
+                elif response_value > 0:
+                    logger.info(f"SMS sent successfully via Payamak BaseServiceNumber to {normalized_phone}. Message ID: {response_value}")
+                    return True, None, response_data
+            except ValueError:
+                if isinstance(response_data, dict):
+                    error_field = response_data.get('error') or response_data.get('Error') or response_data.get('message')
+                    if error_field:
+                        error_msg = f"Payamak BaseServiceNumber error: {error_field}"
+                        logger.error(f"Error sending to {normalized_phone}: {error_msg}")
+                        return False, error_msg, response_data
+                    
+                    ret_status = response_data.get('RetStatus')
+                    str_ret_status = response_data.get('StrRetStatus', '')
+                    value = response_data.get('Value', '')
+                    
+                    if ret_status == 1 and str_ret_status.lower() == 'ok':
+                        logger.info(f"✅ Payamak BaseServiceNumber accepted SMS for {normalized_phone}. RetStatus: {ret_status}")
+                        return True, None, response_data
+                    elif ret_status and ret_status < 0:
+                        error_msg = f"Payamak BaseServiceNumber error: RetStatus={ret_status}, StrRetStatus={str_ret_status}"
+                        logger.error(f"Error sending to {normalized_phone}: {error_msg}")
+                        return False, error_msg, response_data
+                    else:
+                        logger.warning(f"Payamak BaseServiceNumber returned unknown status for {normalized_phone}: RetStatus={ret_status}")
+                        return True, None, response_data
+                else:
+                    logger.warning(f"Payamak BaseServiceNumber returned non-numeric response for {normalized_phone}: {response_text}")
+                    return True, None, response_data
+            
             logger.info(f"SMS sent successfully via Payamak BaseServiceNumber to {normalized_phone}")
             return True, None, response_data
         else:
@@ -290,29 +377,34 @@ def send_sms(phone_number, message):
     2. Development mode (log to console only)
     
     Args:
-        phone_number (str): Phone number to send SMS to (format: 09123456789 or +989123456789)
+        phone_number (str): Phone number to send SMS to
         message (str): Message content
         
     Returns:
         tuple: (success: bool, error_message: str or None)
-               If success=True, error_message is None
-               If success=False, error_message contains the error details
     """
     try:
-        # Temporary global mode: always try Payamak BaseServiceNumber first (single pattern for all)
+        is_free_form = len(message) > 10 or any(c.isalpha() for c in message)
+        
         payamak_username = settings.PAYAMAK_USERNAME
         payamak_password = settings.PAYAMAK_PASSWORD
         payamak_body_id = settings.PAYAMAK_BODY_ID
 
         if payamak_username and payamak_password and payamak_body_id:
+            if is_free_form:
+                logger.warning(f"⚠️ WARNING: Attempting to send free-form message via Payamak BaseServiceNumber to {phone_number}")
+                logger.warning("⚠️ BaseServiceNumber is for pattern-based OTPs only. Message may not be delivered!")
+                logger.warning("⚠️ For notifications, configure MELIPAYAMAK_USERNAME and MELIPAYAMAK_API_KEY")
+            
             logger.info("Using Payamak BaseServiceNumber SMS (single pattern mode)")
-            success, error_message, _ = send_payamak_base_service_sms(phone_number, message)
+            success, error_message, response_data = send_payamak_base_service_sms(phone_number, message)
             if success:
+                if is_free_form:
+                    logger.warning(f"⚠️ BaseServiceNumber returned success, but free-form messages may not be delivered to {phone_number}")
                 return True, None
             else:
                 logger.warning(f"Payamak BaseServiceNumber failed: {error_message}. Falling back to MeliPayamak.")
 
-        # Check MeliPayamak credentials (fallback provider)
         melipayamak_username = settings.MELIPAYAMAK_USERNAME
         melipayamak_api_key = settings.MELIPAYAMAK_API_KEY
         
@@ -324,11 +416,7 @@ def send_sms(phone_number, message):
         logger.warning("No SMS credentials configured. SMS will be logged only.")
         logger.info(f"[SMS] To: {phone_number}")
         logger.info(f"[SMS] Message: {message}")
-        print(f"\n{'='*60}")
-        print(f"[SMS NOTIFICATION - DEVELOPMENT MODE]")
-        print(f"To: {phone_number}")
-        print(f"Message: {message}")
-        print(f"{'='*60}\n")
+        logger.info(f"[SMS NOTIFICATION - DEVELOPMENT MODE] To: {phone_number}, Message: {message}")
         return True, None
         
     except Exception as e:
@@ -406,72 +494,194 @@ def send_delivery_reminder(phone_number, delivery_date, delivery_id=None):
     from datetime import datetime, timedelta
     from django.utils import timezone
     
-    # Format delivery time period
-    # Assume delivery_date is the start time, estimate end time as +2 hours
     delivery_start = delivery_date
     delivery_end = delivery_date + timedelta(hours=2)
     
-    # Format times in Persian/Farsi style or simple format
     start_time = delivery_start.strftime('%H:%M')
     end_time = delivery_end.strftime('%H:%M')
-    
-    # Format date
     delivery_date_str = delivery_start.strftime('%Y/%m/%d')
     
-    # Create message
     message = f"یادآوری: راننده در بازه زمانی {start_time} تا {end_time} امروز ({delivery_date_str}) به آدرس شما خواهد آمد. لطفا آماده باشید."
-    # English version (optional): f"Reminder: Driver will arrive between {start_time} and {end_time} today ({delivery_date_str}). Please be ready."
     
     success, _ = send_sms(phone_number, message)
     return success
+
+
+def send_sms_with_pattern(phone_number, pattern_id, pattern_args):
+    """
+    Send SMS using a registered MeliPayamak pattern (template).
+    
+    Args:
+        phone_number (str): Phone number to send SMS to
+        pattern_id (int): Pattern ID (BodyId) from MeliPayamak
+        pattern_args (list): List of values to replace pattern variables
+        
+    Returns:
+        tuple: (success: bool, error_message: str or None)
+    """
+    try:
+        username = settings.MELIPAYAMAK_USERNAME
+        api_key = settings.MELIPAYAMAK_API_KEY
+        
+        if not username or not api_key:
+            error_msg = "MeliPayamak credentials not configured. Please set MELIPAYAMAK_USERNAME and MELIPAYAMAK_API_KEY in settings."
+            logger.error(error_msg)
+            return False, error_msg
+        
+        normalized_phone = _normalize_phone_number(phone_number)
+        
+        # Try Smart Webservice first (if available)
+        rest_endpoint = "https://rest.payamak-panel.com/api/SendSMS/SendByBaseNumber"
+        
+        # If Smart Webservice is not available, use regular REST API with formatted message
+        # Format message according to pattern: "سلام کد شما: {0} می باشد نرم افزار میلیونر"
+        # Pattern 395131 format: "سلام کد شما: {0} می باشد نرم افزار میلیونر"
+        if pattern_id == 395131 and len(pattern_args) == 1:
+            # Use regular REST API with formatted message
+            formatted_message = f"سلام کد شما: {pattern_args[0]} می باشد نرم افزار میلیونر"
+            logger.info(f"Using regular REST API with formatted message for Pattern 395131")
+            return _send_sms_melipayamak(phone_number, formatted_message)
+        
+        payload = {
+            'username': username,
+            'password': api_key,
+            'to': normalized_phone,
+            'bodyId': pattern_id,
+            'args': pattern_args
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
+        logger.info(f"Sending SMS via MeliPayamak Smart webservice (REST API) to {normalized_phone}")
+        logger.info(f"Pattern ID: {pattern_id}")
+        logger.info(f"Pattern args: {pattern_args}")
+        
+        response = requests.post(
+            rest_endpoint,
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
+        
+        logger.info(f"MeliPayamak Smart API Response Status: {response.status_code}")
+        logger.info(f"MeliPayamak Smart API Response Text: {response.text[:500]}")
+        
+        if response.status_code == 200:
+            try:
+                response_data = response.json()
+                logger.info(f"MeliPayamak Smart API Response JSON: {json.dumps(response_data, indent=2, ensure_ascii=False)}")
+                
+                status = None
+                message_id = None
+                error_message = None
+                
+                if isinstance(response_data, dict):
+                    status = (
+                        response_data.get('StrRetStatus') or
+                        response_data.get('status') or
+                        response_data.get('Status') or
+                        response_data.get('RetStatus') or
+                        response_data.get('result')
+                    )
+                    
+                    message_id = (
+                        response_data.get('RetStatus') or
+                        response_data.get('messageId') or
+                        response_data.get('MessageId') or
+                        response_data.get('id')
+                    )
+                    
+                    error_message = (
+                        response_data.get('message') or
+                        response_data.get('Message') or
+                        response_data.get('error') or
+                        response_data.get('Error')
+                    )
+                
+                is_success = False
+                
+                if isinstance(status, (int, float)) and status > 0:
+                    is_success = True
+                elif isinstance(message_id, (int, float)) and message_id > 0:
+                    is_success = True
+                elif isinstance(status, str) and status.lower() in ['ok', 'success', 'true']:
+                    is_success = True
+                elif isinstance(response_data, dict) and 'RetStatus' in response_data:
+                    ret_status = response_data.get('RetStatus')
+                    if isinstance(ret_status, (int, float)) and ret_status > 0:
+                        is_success = True
+                        message_id = ret_status
+                
+                if is_success:
+                    logger.info(f"SMS sent successfully via MeliPayamak Smart pattern {pattern_id} to {normalized_phone}. Message ID: {message_id}")
+                    return True, None
+                else:
+                    error_msg = error_message or str(response_data) or "Unknown error from API"
+                    logger.error(f"MeliPayamak Smart API returned error: {error_msg}")
+                    return False, error_msg
+                    
+            except ValueError:
+                response_text = response.text.strip()
+                
+                try:
+                    result_value = int(response_text)
+                    if result_value > 0:
+                        logger.info(f"SMS sent successfully via MeliPayamak Smart pattern {pattern_id} to {normalized_phone}. Message ID: {result_value}")
+                        return True, None
+                    else:
+                        error_msg = f"API returned error code: {result_value}"
+                        logger.error(f"MeliPayamak Smart API error: {error_msg}")
+                        return False, error_msg
+                except ValueError:
+                    error_msg = f"Unexpected API response: {response_text}"
+                    logger.error(f"MeliPayamak Smart API error: {error_msg}")
+                    return False, error_msg
+        else:
+            error_msg = f"HTTP {response.status_code}: {response.text}"
+            logger.error(f"MeliPayamak Smart API request failed: {error_msg}")
+            return False, error_msg
+            
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Network error: {str(e)}"
+        logger.error(f"Network error while sending SMS via MeliPayamak Smart pattern: {error_msg}")
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"Failed to send SMS via MeliPayamak Smart pattern: {error_msg}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False, error_msg
 
 
 def add_melipayamak_pattern(title, body, black_list_id=1):
     """
     Add a pattern (template) to MeliPayamak using SharedServiceBodyAdd method.
     
-    Patterns are pre-approved SMS templates that can be used to send messages.
-    This is useful for:
-    - Pre-approved message templates (required in some countries)
-    - Consistent message formatting
-    - Better deliverability
-    
     Args:
-        title (str): Pattern title/name (e.g., "Order Confirmation")
-        body (str): Pattern body with variables (e.g., "Your order #{code} has been confirmed. Total: {amount} Rials")
-                    Use {variable_name} format for variables
-        black_list_id (int): Black list ID (default: 1 as per MeliPayamak documentation)
+        title (str): Pattern title/name
+        body (str): Pattern body with variables
+        black_list_id (int): Black list ID (default: 1)
     
     Returns:
         tuple: (success: bool, pattern_id: int or None, error_message: str or None)
-               If success=True: pattern_id contains the BodyId (5-6 digit number)
-               If success=False: pattern_id is None and error_message contains the error
-    
-    Example:
-        success, pattern_id, error = add_melipayamak_pattern(
-            title="Order Confirmation",
-            body="Your order #{order_id} has been confirmed. Total: {amount} Rials"
-        )
-        if success:
-            print(f"Pattern registered with ID: {pattern_id}")
     """
     try:
         username = settings.MELIPAYAMAK_USERNAME
-        api_key = settings.MELIPAYAMAK_API_KEY  # API Key is used as password
+        api_key = settings.MELIPAYAMAK_API_KEY
         
         if not username or not api_key:
             error_msg = "MeliPayamak credentials not configured. Please set MELIPAYAMAK_USERNAME and MELIPAYAMAK_API_KEY in settings."
             logger.error(error_msg)
             return False, None, error_msg
         
-        # MeliPayamak SharedService SOAP endpoint
-        # Using non-WSDL format: POST to method URL with form-encoded data
         endpoint = "https://api.payamak-panel.com/post/SharedService.asmx/SharedServiceBodyAdd"
         
-        # Prepare payload
         payload = {
             'username': username,
-            'password': api_key,  # API Key is used as password
+            'password': api_key,
             'title': title,
             'body': body,
             'blackListId': black_list_id
@@ -485,7 +695,6 @@ def add_melipayamak_pattern(title, body, black_list_id=1):
         logger.info(f"Adding MeliPayamak pattern: {title}")
         logger.info(f"Pattern body: {body}")
         
-        # Send POST request
         response = requests.post(
             endpoint,
             data=payload,
@@ -499,30 +708,22 @@ def add_melipayamak_pattern(title, body, black_list_id=1):
         if response.status_code == 200:
             response_text = response.text.strip()
             
-            # Parse response - can be XML or plain text
             try:
                 import xml.etree.ElementTree as ET
                 root = ET.fromstring(response_text)
-                # Look for SharedServiceBodyAddResult element
                 result_elem = root.find('.//{http://tempuri.org/}SharedServiceBodyAddResult')
                 if result_elem is not None:
                     result_text = result_elem.text.strip()
                 else:
-                    # Try without namespace
                     result_elem = root.find('.//SharedServiceBodyAddResult')
                     result_text = result_elem.text.strip() if result_elem is not None else response_text
             except ET.ParseError:
-                # Not XML, treat as plain text
                 result_text = response_text
             
-            # Parse result
-            # Success: positive number (5-6 digits) = BodyId
-            # Error: -2 (invalid black list ID), 0 (wrong credentials), negative number
             try:
                 result_value = int(result_text)
                 
                 if result_value > 0:
-                    # Success - result_value is the BodyId (pattern ID)
                     logger.info(f"Pattern '{title}' registered successfully with BodyId: {result_value}")
                     return True, result_value, None
                 elif result_value == -2:
@@ -538,7 +739,6 @@ def add_melipayamak_pattern(title, body, black_list_id=1):
                     logger.error(f"MeliPayamak Pattern API error: {error_msg}")
                     return False, None, error_msg
             except ValueError:
-                # Not a number, might be an error message
                 error_msg = f"Unexpected API response: {result_text}"
                 logger.error(f"MeliPayamak Pattern API error: {error_msg}")
                 return False, None, error_msg
@@ -559,330 +759,103 @@ def add_melipayamak_pattern(title, body, black_list_id=1):
         return False, None, error_msg
 
 
-def send_sms_with_pattern(phone_number, pattern_id, pattern_args):
+def send_verification_code_pattern(phone_number, user_name, verification_code):
     """
-    Send SMS using a registered MeliPayamak pattern (template).
+    Send verification code SMS using MeliPayamak pattern 389656.
     
-    This function uses MeliPayamak Smart webservice REST API to send SMS with pre-approved patterns.
-    Patterns must be approved by MeliPayamak before they can be used.
-    
-    According to Smart webservice documentation:
-    - REST API: https://rest.payamak-panel.com/api/SendSMS/SendByBaseNumber
-    - Uses JSON payload with username, password, to, bodyId, and args array
+    This pattern expects: {0}=user_name, {1}=verification_code, {2}=date, {3}=time
     
     Args:
-        phone_number (str): Phone number to send SMS to (format: 09123456789 or +989123456789)
-        pattern_id (int): Pattern ID (BodyId) from MeliPayamak (e.g., 389656)
-        pattern_args (list): List of values to replace pattern variables
-                           Example: If pattern has {۰}, {۱}, {۲}, {۳}
-                           Then pattern_args should be: ['value0', 'value1', 'value2', 'value3']
-    
+        phone_number (str): Phone number to send SMS to
+        user_name (str): User name
+        verification_code (str): Verification code
+        
     Returns:
         tuple: (success: bool, error_message: str or None)
-               If success=True, error_message is None
-               If success=False, error_message contains the error details
-    
-    Example:
-        # Pattern: "کاربر گرامی {۰} کد تایید شما {۱} می باشد. تاریخ {۲} در ساعت {۳}"
-        # Pattern ID: 389656
-        success, error = send_sms_with_pattern(
-            phone_number="09123456789",
-            pattern_id=389656,
-            pattern_args=["علی احمدی", "12345", "1404/08/15", "14:30"]
-        )
     """
     try:
-        username = settings.MELIPAYAMAK_USERNAME
-        api_key = settings.MELIPAYAMAK_API_KEY  # API Key is used as password
+        from datetime import datetime
+        from django.utils import timezone
         
-        if not username or not api_key:
-            error_msg = "MeliPayamak credentials not configured. Please set MELIPAYAMAK_USERNAME and MELIPAYAMAK_API_KEY in settings."
-            logger.error(error_msg)
-            return False, error_msg
+        now = timezone.now()
+        date_str = now.strftime('%Y/%m/%d')
+        time_str = now.strftime('%H:%M')
         
-        # Normalize phone number
-        normalized_phone = _normalize_phone_number(phone_number)
+        # Pattern 389656 format: "کاربر گرامی {0} کد تایید شما {1} می باشد. تاریخ {2} در ساعت {3}"
+        pattern_id = 389656
+        pattern_args = [
+            user_name,
+            verification_code,
+            date_str,
+            time_str
+        ]
         
-        # MeliPayamak Smart webservice REST API endpoint
-        # According to Smart webservice documentation
-        rest_endpoint = "https://rest.payamak-panel.com/api/SendSMS/SendByBaseNumber"
+        logger.info(f"Sending verification code via pattern {pattern_id} to {phone_number}")
+        logger.info(f"User: {user_name}, Code: {verification_code}")
         
-        # Prepare JSON payload for REST API
-        # Smart webservice expects: username, password, to, bodyId, args (array)
-        payload = {
-            'username': username,
-            'password': api_key,  # API Key is used as password
-            'to': normalized_phone,
-            'bodyId': pattern_id,
-            'args': pattern_args  # Array of arguments (not comma-separated string)
-        }
-        
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
-        logger.info(f"Sending SMS via MeliPayamak Smart webservice (REST API) to {normalized_phone}")
-        logger.info(f"Pattern ID: {pattern_id}")
-        logger.info(f"Pattern args: {pattern_args}")
-        logger.info(f"Using endpoint: {rest_endpoint}")
-        
-        # Send REST API POST request with JSON payload
-        response = requests.post(
-            rest_endpoint,
-            json=payload,  # Use json parameter for JSON payload
-            headers=headers,
-            timeout=30
+        return send_sms_with_pattern(
+            phone_number=phone_number,
+            pattern_id=pattern_id,
+            pattern_args=pattern_args
         )
         
-        logger.info(f"MeliPayamak Smart API Response Status: {response.status_code}")
-        logger.info(f"MeliPayamak Smart API Response Text: {response.text[:500]}")
-        
-        if response.status_code == 200:
-            # Parse JSON response
-            try:
-                response_data = response.json()
-                logger.info(f"MeliPayamak Smart API Response JSON: {json.dumps(response_data, indent=2, ensure_ascii=False)}")
-                
-                # Check response structure
-                # Success responses typically have status/StrRetStatus or similar fields
-                # Error responses may have error messages
-                
-                # Try to find status indicators
-                status = None
-                message_id = None
-                error_message = None
-                
-                # Common response field names
-                if isinstance(response_data, dict):
-                    # Check for status field
-                    status = (
-                        response_data.get('StrRetStatus') or
-                        response_data.get('status') or
-                        response_data.get('Status') or
-                        response_data.get('RetStatus') or
-                        response_data.get('result')
-                    )
-                    
-                    # Check for message ID
-                    message_id = (
-                        response_data.get('RetStatus') or
-                        response_data.get('messageId') or
-                        response_data.get('MessageId') or
-                        response_data.get('id')
-                    )
-                    
-                    # Check for error message
-                    error_message = (
-                        response_data.get('message') or
-                        response_data.get('Message') or
-                        response_data.get('error') or
-                        response_data.get('Error')
-                    )
-                
-                # Determine success
-                is_success = False
-                
-                # If status is a positive number or "Ok"/"ok"
-                if isinstance(status, (int, float)) and status > 0:
-                    is_success = True
-                elif isinstance(message_id, (int, float)) and message_id > 0:
-                    is_success = True
-                elif isinstance(status, str) and status.lower() in ['ok', 'success', 'true']:
-                    is_success = True
-                elif isinstance(response_data, dict) and 'RetStatus' in response_data:
-                    # RetStatus > 0 means success
-                    ret_status = response_data.get('RetStatus')
-                    if isinstance(ret_status, (int, float)) and ret_status > 0:
-                        is_success = True
-                        message_id = ret_status
-                
-                if is_success:
-                    logger.info(f"SMS sent successfully via MeliPayamak Smart pattern {pattern_id} to {normalized_phone}. Message ID: {message_id}")
-                    return True, None
-                else:
-                    # Error case
-                    error_msg = error_message or str(response_data) or "Unknown error from API"
-                    logger.error(f"MeliPayamak Smart API returned error: {error_msg}")
-                    return False, error_msg
-                    
-            except ValueError:
-                # Response is not JSON, treat as plain text
-                response_text = response.text.strip()
-                
-                # Check if it's a success (positive number)
-                try:
-                    result_value = int(response_text)
-                    if result_value > 0:
-                        logger.info(f"SMS sent successfully via MeliPayamak Smart pattern {pattern_id} to {normalized_phone}. Message ID: {result_value}")
-                        return True, None
-                    else:
-                        error_msg = f"API returned error code: {result_value}"
-                        logger.error(f"MeliPayamak Smart API error: {error_msg}")
-                        return False, error_msg
-                except ValueError:
-                    # Not a number
-                    if 'ok' in response_text.lower() or response_text.startswith('1'):
-                        logger.info(f"SMS sent successfully via MeliPayamak Smart pattern {pattern_id} to {normalized_phone}")
-                        return True, None
-                    else:
-                        error_msg = f"Unexpected API response: {response_text}"
-                        logger.error(f"MeliPayamak Smart API error: {error_msg}")
-                        return False, error_msg
-        else:
-            error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
-            logger.error(f"MeliPayamak Smart API request failed: {error_msg}")
-            return False, error_msg
-            
-    except requests.exceptions.RequestException as e:
-        error_msg = f"Network error: {str(e)}"
-        logger.error(f"Network error while sending SMS via MeliPayamak pattern: {error_msg}")
-        return False, error_msg
     except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
-        logger.error(f"Failed to send SMS via MeliPayamak pattern: {error_msg}")
+        error_msg = f"Unexpected error in send_verification_code_pattern: {str(e)}"
+        logger.error(error_msg)
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return False, error_msg
 
 
-def _send_sms_with_pattern_soap(phone_number, pattern_id, pattern_args, username, api_key, normalized_phone):
+def send_universal_pattern_sms(phone_number, message):
     """
-    Alternative SOAP XML approach for sending SMS with pattern.
-    This is used as a fallback when form-encoded POST fails.
-    """
-    try:
-        # Convert pattern_args list to comma-separated string
-        pattern_text = ','.join(str(arg) for arg in pattern_args)
-        
-        # Try different method names with SOAP XML
-        method_names = ["SendByBaseNumber2", "SendByBaseNumber", "SendByBaseNumber3"]
-        base_endpoint = "https://api.payamak-panel.com/post/SharedService.asmx"
-        
-        for method_name in method_names:
-            # Escape XML special characters
-            import html
-            escaped_username = html.escape(str(username))
-            escaped_password = html.escape(str(api_key))
-            escaped_text = html.escape(str(pattern_text))
-            escaped_to = html.escape(str(normalized_phone))
-            
-            # Create SOAP XML envelope
-            soap_body = f'''<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <{method_name} xmlns="http://tempuri.org/">
-      <username>{escaped_username}</username>
-      <password>{escaped_password}</password>
-      <text>{escaped_text}</text>
-      <to>{escaped_to}</to>
-      <bodyId>{pattern_id}</bodyId>
-    </{method_name}>
-  </soap:Body>
-</soap:Envelope>'''
-            
-            headers = {
-                'Content-Type': 'text/xml; charset=utf-8',
-                'SOAPAction': f'http://tempuri.org/{method_name}',
-                'Accept': 'text/xml, application/xml'
-            }
-            
-            logger.info(f"Trying SOAP XML method: {method_name}")
-            
-            response = requests.post(
-                base_endpoint,
-                data=soap_body.encode('utf-8'),
-                headers=headers,
-                timeout=30
-            )
-            
-            logger.info(f"SOAP XML Response Status: {response.status_code}")
-            logger.info(f"SOAP XML Response Text: {response.text[:500]}")
-            
-            if response.status_code == 200:
-                if "method name is not valid" in response.text.lower():
-                    continue
-                
-                # Parse SOAP response
-                try:
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(response.text)
-                    result_elem = root.find(f'.//{{http://tempuri.org/}}{method_name}Result')
-                    if result_elem is not None:
-                        result_text = result_elem.text.strip()
-                    else:
-                        result_elem = root.find(f'.//{method_name}Result')
-                        result_text = result_elem.text.strip() if result_elem is not None else response.text
-                    
-                    try:
-                        result_value = int(result_text)
-                        if result_value > 0:
-                            logger.info(f"SMS sent successfully via SOAP XML pattern {pattern_id} to {normalized_phone}. Message ID: {result_value}")
-                            return True, None
-                        else:
-                            continue  # Try next method
-                    except ValueError:
-                        if 'ok' in result_text.lower():
-                            logger.info(f"SMS sent successfully via SOAP XML pattern {pattern_id} to {normalized_phone}")
-                            return True, None
-                        continue
-                except ET.ParseError:
-                    continue
-        
-        return False, "All SOAP XML methods failed. Please check MeliPayamak documentation for correct method name."
-    except Exception as e:
-        error_msg = f"SOAP XML error: {str(e)}"
-        logger.error(error_msg)
-        return False, error_msg
-
-
-def send_verification_code_pattern(phone_number, user_name, verification_code, date=None, time=None):
-    """
-    Send verification code SMS using the Zistino pattern (ID: 389656).
+    ارسال SMS با استفاده از Pattern 395131 که برای همه پیام‌ها کار می‌کند.
     
-    Pattern: "کاربر گرامی {۰} کد تایید شما {۱} می باشد. تاریخ {۲} در ساعت {۳} www.zistino.com"
-    Pattern ID: 389656
+    این تابع از REST API معمولی MeliPayamak استفاده می‌کند (نه Smart Webservice).
+    Pattern 395131: "سلام کد شما: {0} می باشد نرم افزار میلیونر"
     
     Args:
-        phone_number (str): Phone number to send SMS to
-        user_name (str): User's name (replaces {۰})
-        verification_code (str): Verification code (replaces {۱})
-        date (str, optional): Date in format "1404/08/15" (replaces {۲}). If None, uses current date
-        time (str, optional): Time in format "14:30" (replaces {۳}). If None, uses current time
+        phone_number (str): شماره تلفن گیرنده
+        message (str): پیام (می‌تواند کد OTP یا پیام متنی باشد)
     
     Returns:
         tuple: (success: bool, error_message: str or None)
-    
-    Example:
-        success, error = send_verification_code_pattern(
-            phone_number="09123456789",
-            user_name="علی احمدی",
-            verification_code="12345"
-        )
     """
-    from datetime import datetime
-    
-    # Use current date/time if not provided
-    if date is None:
-        # Convert to Persian date format (you may need to adjust this based on your needs)
-        # For now, using simple format
-        now = datetime.now()
-        date = now.strftime('%Y/%m/%d')
-    
-    if time is None:
-        now = datetime.now()
-        time = now.strftime('%H:%M')
-    
-    # Pattern variables: {۰}, {۱}, {۲}, {۳}
-    pattern_args = [
-        user_name,           # {۰} - User name
-        verification_code,  # {۱} - Verification code
-        date,               # {۲} - Date
-        time                # {۳} - Time
-    ]
-    
-    return send_sms_with_pattern(
-        phone_number=phone_number,
-        pattern_id=389656,  # Zistino verification code pattern ID
-        pattern_args=pattern_args
-    )
+    try:
+        pattern_id = settings.MELIPAYAMAK_PATTERN_ID
+        
+        if not pattern_id:
+            error_msg = "MELIPAYAMAK_PATTERN_ID not configured in settings."
+            logger.error(error_msg)
+            return False, error_msg
+        
+        try:
+            pattern_id_int = int(pattern_id)
+        except (ValueError, TypeError):
+            error_msg = f"Invalid MELIPAYAMAK_PATTERN_ID: {pattern_id}. Must be a number."
+            logger.error(error_msg)
+            return False, error_msg
+        
+        # Pattern 395131 format: "سلام کد شما: {0} می باشد نرم افزار میلیونر"
+        # Use REST API directly (not Smart Webservice) - works for all numbers
+        # IMPORTANT: This function only works with Pattern 395131!
+        if pattern_id_int != 395131:
+            error_msg = f"Pattern ID {pattern_id_int} is not supported. This function only works with Pattern 395131. Please set MELIPAYAMAK_PATTERN_ID=395131 in .env"
+            logger.error(error_msg)
+            return False, error_msg
+        
+        formatted_message = f"سلام کد شما: {message} می باشد نرم افزار میلیونر"
+        
+        logger.info(f"Sending SMS via REST API with Pattern {pattern_id_int} format to {phone_number}")
+        logger.info(f"Original message: {message}")
+        logger.info(f"Formatted message: {formatted_message}")
+        
+        # Use regular REST API (works for all numbers)
+        return _send_sms_melipayamak(phone_number, formatted_message)
+        
+    except Exception as e:
+        error_msg = f"Unexpected error in send_universal_pattern_sms: {str(e)}"
+        logger.error(error_msg)
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return False, error_msg

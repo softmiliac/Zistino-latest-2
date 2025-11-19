@@ -481,5 +481,16 @@
   "please_fill_all_fields": "لطفا تمام فیلدها را پر کنید",
   "enter_message": "متن پیام را وارد کنید...",
   "user_id": "شناسه کاربر",
-  "optional": "اختیاری"
+  "optional": "اختیاری",
+  "award_points": "اعطای امتیاز",
+  "current_points": "امتیاز فعلی",
+  "enter_points_amount": "مقدار امتیاز را وارد کنید",
+  "optional_description": "توضیحات اختیاری...",
+  "points_awarded_successfully": "امتیاز با موفقیت اعطا شد",
+  "please_enter_valid_amount": "لطفا مقدار معتبری وارد کنید",
+  "manual_award_by_admin": "اعطای دستی توسط مدیر",
+  "eligible_drivers": "رانندگان واجد شرایط",
+  "min_points": "حداقل امتیاز",
+  "draw_winner": "قرعه کشی",
+  "no_eligible_drivers": "راننده واجد شرایطی یافت نشد"
 }

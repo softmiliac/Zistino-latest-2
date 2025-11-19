@@ -25,6 +25,7 @@ urlpatterns = [
     
     # Admin endpoints - Points management
     path('points/search', views.AdminPointTransactionSearchView.as_view(), name='admin-point-transactions-search'),
+    path('points/drivers-list', views.AdminDriversPointsListView.as_view(), name='admin-points-drivers-list'),
     path('points/manual-award', views.AdminManualAwardPointsView.as_view(), name='admin-points-manual-award'),
     
     # Admin endpoints - Referral management

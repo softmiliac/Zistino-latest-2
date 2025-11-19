@@ -104,9 +104,11 @@ class SendCodeView(APIView):
         )
         
         # Send SMS using SMS service (Payamak BaseServiceNumber pattern)
+        # Pattern 270325 expects only the OTP code, not the full message
+        # Pattern format: "سلام. کد تایید شما {code} می باشد گروه نرم افزاری میلیونر https://www.softmiliac.co/m"
         from zistino_apps.payments.sms_service import send_sms
-        sms_message = f"کد تایید شما: {code}"
-        sms_success, sms_error = send_sms(phone_number, sms_message)
+        # Send only the code, Pattern will format it
+        sms_success, sms_error = send_sms(phone_number, code)
         
         if not sms_success:
             # Log error but don't fail the request (code is still generated)
@@ -560,9 +562,10 @@ class ForgotPasswordView(APIView):
             )
             
             # Send SMS using SMS service (Payamak BaseServiceNumber pattern)
+            # Pattern 270325 expects only the OTP code, not the full message
             from zistino_apps.payments.sms_service import send_sms
-            sms_message = f"کد بازیابی رمز عبور شما: {code}"
-            sms_success, sms_error = send_sms(phone_number, sms_message)
+            # Send only the code, Pattern will format it
+            sms_success, sms_error = send_sms(phone_number, code)
             
             if not sms_success:
                 # Log error but don't fail the request (code is still generated)

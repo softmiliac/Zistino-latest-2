@@ -4,7 +4,7 @@
 This guide covers browsing products, categories, and store items. **Endpoints are organized by priority: Read first, then Create.**
 
 ## 📋 Prerequisites
-- Completed [2-user-profile-guide](../2-user-profile-guide/README.md)
+- Completed [API_ENDPOINTS_GUIDE.md](../API_ENDPOINTS_GUIDE.md) Step 1-3 (Authentication and Profile)
 - Have a valid authentication token
 
 ---
@@ -15,11 +15,11 @@ This guide covers browsing products, categories, and store items. **Endpoints ar
 
 **Purpose**: Get all product categories.
 
-**Endpoint**: `GET /api/v1/products/categories/`
+**Endpoint**: `GET /api/v1/categories/`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -46,8 +46,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/categories/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/categories/" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -56,11 +56,11 @@ curl -X GET "http://127.0.0.1:8000/api/v1/products/categories/" \
 
 **Purpose**: Get details of a specific category.
 
-**Endpoint**: `GET /api/v1/products/categories/{id}/`
+**Endpoint**: `GET /api/v1/categories/{id}`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -85,8 +85,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/categories/abc12345-def6-7890-ghij-klmnopqrstuv/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/categories/abc12345-def6-7890-ghij-klmnopqrstuv" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -95,18 +95,24 @@ curl -X GET "http://127.0.0.1:8000/api/v1/products/categories/abc12345-def6-7890
 
 **Purpose**: Get all products (with optional filtering).
 
-**Endpoint**: `GET /api/v1/products/products/`
+**Endpoint**: `GET /api/v1/products/` or `POST /api/v1/products/search`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
-**Query Parameters** (Optional):
-- `category`: Filter by category ID
-- `search`: Search in product name/description
+**For Search (Recommended)**: Use `POST /api/v1/products/search` with request body:
+```json
+{
+  "pageNumber": 1,
+  "pageSize": 20,
+  "keyword": "",
+  "categoryId": ""
+}
+```
 
-**Request Body**: None
+**For Simple List**: Use `GET /api/v1/products/` (returns all active products)
 
 **Response** (200 OK):
 ```json
@@ -138,8 +144,10 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/products/?category=abc12345-def6-7890-ghij-klmnopqrstuv" \
-  -H "Authorization: Token your-token-here"
+curl -X POST "http://127.0.0.1:8000/api/v1/products/search" \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"pageNumber": 1, "pageSize": 20, "categoryId": "abc12345-def6-7890-ghij-klmnopqrstuv"}'
 ```
 
 ---
@@ -148,11 +156,11 @@ curl -X GET "http://127.0.0.1:8000/api/v1/products/products/?category=abc12345-d
 
 **Purpose**: Get detailed information about a specific product.
 
-**Endpoint**: `GET /api/v1/products/products/{id}/`
+**Endpoint**: `GET /api/v1/products/{id}`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -193,8 +201,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/products/46e818ce-0518-4c64-8438-27bc7163a706/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/products/46e818ce-0518-4c64-8438-27bc7163a706" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -203,11 +211,13 @@ curl -X GET "http://127.0.0.1:8000/api/v1/products/products/46e818ce-0518-4c64-8
 
 **Purpose**: Get comments/reviews for a product.
 
-**Endpoint**: `GET /api/v1/products/products/{id}/comments/`
+**Endpoint**: `POST /api/v1/products/comments/commentsbyproductidasync` (for creating comments)
+
+**Note**: To get comments, use the product detail endpoint which includes comments, or check the comments endpoint in compatibility layer.
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -235,8 +245,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/products/46e818ce-0518-4c64-8438-27bc7163a706/comments/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/products/46e818ce-0518-4c64-8438-27bc7163a706" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -245,11 +255,11 @@ curl -X GET "http://127.0.0.1:8000/api/v1/products/products/46e818ce-0518-4c64-8
 
 **Purpose**: Get product codes (e.g., SIM card recharge codes) for a product.
 
-**Endpoint**: `GET /api/v1/products/products/{product_id}/codes/`
+**Endpoint**: `GET /api/v1/products/{id}/codes`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -273,8 +283,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/products/46e818ce-0518-4c64-8438-27bc7163a706/codes/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/products/46e818ce-0518-4c64-8438-27bc7163a706/codes" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -283,17 +293,22 @@ curl -X GET "http://127.0.0.1:8000/api/v1/products/products/46e818ce-0518-4c64-8
 
 **Purpose**: Search products by keyword.
 
-**Endpoint**: `GET /api/v1/products/products/?search=keyword`
+**Endpoint**: `POST /api/v1/products/search` (Recommended) or `GET /api/v1/products/` with query params
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
-**Query Parameters**:
-- `search`: Search keyword
-
-**Request Body**: None
+**Request Body** (for POST /api/v1/products/search):
+```json
+{
+  "pageNumber": 1,
+  "pageSize": 20,
+  "keyword": "plastic",
+  "categoryId": ""
+}
+```
 
 **Response** (200 OK):
 ```json
@@ -310,8 +325,10 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/products/products/?search=plastic" \
-  -H "Authorization: Token your-token-here"
+curl -X POST "http://127.0.0.1:8000/api/v1/products/search" \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"pageNumber": 1, "pageSize": 20, "keyword": "plastic"}'
 ```
 
 ---

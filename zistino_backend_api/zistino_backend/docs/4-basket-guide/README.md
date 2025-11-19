@@ -16,11 +16,11 @@ This guide covers shopping basket operations: viewing basket, adding items, and 
 
 **Purpose**: Get current user's shopping basket with all items.
 
-**Endpoint**: `GET /api/v1/baskets/`
+**Endpoint**: `GET /api/v1/baskets/` or `GET /api/v1/baskets/client`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -73,8 +73,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/baskets/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/baskets/client" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -85,11 +85,11 @@ curl -X GET "http://127.0.0.1:8000/api/v1/baskets/" \
 
 **Purpose**: Add a product to the shopping basket. If product already exists, quantity will be increased.
 
-**Endpoint**: `POST /api/v1/baskets/items/`
+**Endpoint**: `POST /api/v1/baskets/` or `POST /api/v1/baskets/client`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 Content-Type: application/json
 ```
 
@@ -148,8 +148,8 @@ Content-Type: application/json
 
 **cURL Example**:
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/baskets/items/" \
-  -H "Authorization: Token your-token-here" \
+curl -X POST "http://127.0.0.1:8000/api/v1/baskets/client" \
+  -H "Authorization: Bearer your-token-here" \
   -H "Content-Type: application/json" \
   -d '{
     "product": "46e818ce-0518-4c64-8438-27bc7163a706",
@@ -165,11 +165,11 @@ curl -X POST "http://127.0.0.1:8000/api/v1/baskets/items/" \
 
 **Purpose**: Apply a discount coupon to the basket.
 
-**Endpoint**: `POST /api/v1/baskets/apply-coupon/`
+**Endpoint**: `POST /api/v1/baskets/apply-coupon` (if available) or check coupons endpoint
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 Content-Type: application/json
 ```
 
@@ -222,7 +222,7 @@ Content-Type: application/json
 **cURL Example**:
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/baskets/apply-coupon/" \
-  -H "Authorization: Token your-token-here" \
+  -H "Authorization: Bearer your-token-here" \
   -H "Content-Type: application/json" \
   -d '{"code": "SUMMER25"}'
 ```

@@ -1391,12 +1391,12 @@ class AdminLotteryViewSet(viewsets.ModelViewSet):
         
         lottery = self.get_object()
         
-        # Get minimum points threshold from query params (optional, defaults to 0)
-        min_points = request.query_params.get('min_points', 0)
+        # Get minimum points threshold from query params (optional, defaults to 1)
+        min_points = request.query_params.get('min_points', 1)
         try:
             min_points = int(min_points)
         except (ValueError, TypeError):
-            min_points = 0
+            min_points = 1
         
         # Get all active drivers and annotate with their points balance (defaulting to 0 if no UserPoints record)
         eligible_drivers = User.objects.filter(
@@ -1442,12 +1442,12 @@ class AdminLotteryViewSet(viewsets.ModelViewSet):
         
         lottery = self.get_object()
         
-        # Get minimum points threshold from request (optional, defaults to 0)
-        min_points = request.data.get('min_points', 0)
+        # Get minimum points threshold from request (optional, defaults to 1)
+        min_points = request.data.get('min_points', 1)
         try:
             min_points = int(min_points)
         except (ValueError, TypeError):
-            min_points = 0
+            min_points = 1
         
         # Get eligible drivers (drivers with points >= min_points)
         from zistino_apps.points.models import UserPoints
@@ -1918,6 +1918,166 @@ class AdminManualAwardPointsView(APIView):
         return Response({
             'new_balance': new_balance,
             'points_awarded': amount
+        }, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    tags=['Admin'],
+    operation_id='points_drivers_list',
+    summary='List all drivers with points balance',
+    description='Admin endpoint to list all drivers with their current points balance. Shows all drivers even if they have 0 points.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'pageNumber': {'type': 'integer', 'description': 'Page number (default: 1)'},
+                'pageSize': {'type': 'integer', 'description': 'Page size (default: 20)'},
+                'keyword': {'type': 'string', 'description': 'Search keyword (phone, name)'}
+            }
+        }
+    },
+    examples=[
+        OpenApiExample(
+            'List all drivers',
+            value={
+                'pageNumber': 1,
+                'pageSize': 20,
+                'keyword': ''
+            }
+        ),
+        OpenApiExample(
+            'Search by phone number',
+            value={
+                'pageNumber': 1,
+                'pageSize': 20,
+                'keyword': '+989121234567'
+            }
+        )
+    ],
+    responses={
+        200: {
+            'description': 'List of drivers with points',
+            'content': {
+                'application/json': {
+                    'example': {
+                        'items': [
+                            {
+                                'userId': '0641067f-df76-416c-98cd-6f89e43d3b3f',
+                                'userPhone': '+989121234567',
+                                'userName': 'John Doe',
+                                'points': 150,
+                                'lifetimeEarned': 200,
+                                'lifetimeSpent': 50
+                            },
+                            {
+                                'userId': '46e818ce-0518-4c64-8438-27bc7163a706',
+                                'userPhone': '+989121234568',
+                                'userName': 'Jane Smith',
+                                'points': 0,
+                                'lifetimeEarned': 0,
+                                'lifetimeSpent': 0
+                            }
+                        ],
+                        'pageNumber': 1,
+                        'pageSize': 20,
+                        'total': 50
+                    }
+                }
+            }
+        }
+    }
+)
+class AdminDriversPointsListView(APIView):
+    """Admin endpoint to list all drivers with their points balance."""
+    permission_classes = [IsAuthenticated, IsManager]
+
+    def post(self, request):
+        """List all drivers with points balance."""
+        from django.db.models import F, Case, When, IntegerField, Value
+        
+        page_number = request.data.get('pageNumber', 1)
+        page_size = request.data.get('pageSize', 20)
+        keyword = request.data.get('keyword', '').strip()
+        
+        try:
+            page_number = int(page_number)
+        except (ValueError, TypeError):
+            page_number = 1
+        
+        try:
+            page_size = int(page_size)
+        except (ValueError, TypeError):
+            page_size = 20
+        
+        # Get all active drivers and annotate with their points balance
+        qs = User.objects.filter(
+            is_driver=True,
+            is_active=True,
+            is_active_driver=True
+        ).annotate(
+            points_balance=Case(
+                When(user_points__isnull=False, then=F('user_points__balance')),
+                default=Value(0),
+                output_field=IntegerField()
+            ),
+            lifetime_earned=Case(
+                When(user_points__isnull=False, then=F('user_points__lifetime_earned')),
+                default=Value(0),
+                output_field=IntegerField()
+            ),
+            lifetime_spent=Case(
+                When(user_points__isnull=False, then=F('user_points__lifetime_spent')),
+                default=Value(0),
+                output_field=IntegerField()
+            )
+        ).select_related('user_points').distinct()
+        
+        # Filter by keyword if provided
+        if keyword:
+            qs = qs.filter(
+                Q(phone_number__icontains=keyword) |
+                Q(first_name__icontains=keyword) |
+                Q(last_name__icontains=keyword)
+            )
+        
+        # Order by points balance (descending)
+        qs = qs.order_by('-points_balance', '-created_at')
+        
+        # Pagination
+        total = qs.count()
+        start = (page_number - 1) * page_size
+        end = start + page_size
+        drivers = qs[start:end]
+        
+        # Serialize driver data
+        drivers_data = []
+        for driver in drivers:
+            points = getattr(driver, 'points_balance', None)
+            if points is None:
+                points = driver.user_points.balance if hasattr(driver, 'user_points') and driver.user_points else 0
+            
+            lifetime_earned = getattr(driver, 'lifetime_earned', None)
+            if lifetime_earned is None:
+                lifetime_earned = driver.user_points.lifetime_earned if hasattr(driver, 'user_points') and driver.user_points else 0
+            
+            lifetime_spent = getattr(driver, 'lifetime_spent', None)
+            if lifetime_spent is None:
+                lifetime_spent = driver.user_points.lifetime_spent if hasattr(driver, 'user_points') and driver.user_points else 0
+            
+            drivers_data.append({
+                'userId': str(driver.id),
+                'userPhone': driver.phone_number,
+                'userName': f"{driver.first_name} {driver.last_name}".strip() or driver.phone_number,
+                'points': points,
+                'lifetimeEarned': lifetime_earned,
+                'lifetimeSpent': lifetime_spent
+            })
+        
+        return Response({
+            'items': drivers_data,
+            'pageNumber': page_number,
+            'pageSize': page_size,
+            'total': total
         }, status=status.HTTP_200_OK)
 
 

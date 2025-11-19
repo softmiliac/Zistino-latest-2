@@ -165,9 +165,9 @@ class OrderItemCreateRequestSerializer(serializers.Serializer):
 class OrderCreateRequestSerializer(serializers.Serializer):
     """Request serializer for creating order matching old Swagger format."""
     totalPrice = serializers.IntegerField(required=True, min_value=0, help_text='Total order price in Rials')
-    address1 = serializers.CharField(required=True, help_text='Primary address')
+    address1 = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Primary address')
     address2 = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Secondary address')
-    phone1 = serializers.CharField(required=True, help_text='Primary phone number')
+    phone1 = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Primary phone number')
     phone2 = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Secondary phone number')
     createOrderDate = serializers.DateTimeField(required=False, allow_null=True, help_text='Order creation date')
     submitPriceDate = serializers.DateTimeField(required=False, allow_null=True, help_text='Price submission date')

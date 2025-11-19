@@ -20,14 +20,6 @@ urlpatterns = [
     path('deposits/search', views.AdminDepositRequestSearchView.as_view(), name='deposit-request-search'),
     path('deposits/<uuid:pk>/approve', views.AdminDepositRequestViewSet.as_view({'post': 'approve'}), name='deposit-request-approve'),
     path('deposits/<uuid:pk>/reject', views.AdminDepositRequestViewSet.as_view({'post': 'reject'}), name='deposit-request-reject'),
-    # SMS Test endpoint
-    path('test-sms', views.TestSMSView.as_view(), name='test-sms'),
-    # SMS Pattern endpoint
-    path('add-sms-pattern', views.AddSMSPatternView.as_view(), name='add-sms-pattern'),
-    # SMS Pattern Test endpoint
-    path('test-sms-pattern', views.TestSMSPatternView.as_view(), name='test-sms-pattern'),
-    # Payamak BaseServiceNumber SMS Test endpoint
-    path('test-payamak-base-service-sms', views.TestPayamakBaseServiceSMSView.as_view(), name='test-payamak-base-service-sms'),
     # Manager credit reports
     path('manager/customer-credits', views.ManagerCustomerCreditsView.as_view(), name='manager-customer-credits'),
     path('manager/driver-credits', views.ManagerDriverCreditsView.as_view(), name='manager-driver-credits'),

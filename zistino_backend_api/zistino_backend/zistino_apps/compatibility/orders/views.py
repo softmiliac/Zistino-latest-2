@@ -586,10 +586,10 @@ class OrdersViewSet(viewsets.ModelViewSet):
                 'Create order',
                 value={
                     'totalPrice': 120,
-                    'address1': 'adasdf',
-                    'address2': 'string',
-                    'phone1': '123',
-                    'phone2': 'string',
+                    'address1': 'adasdf',  # Optional
+                    'address2': 'string',  # Optional
+                    'phone1': '123',  # Optional
+                    'phone2': 'string',  # Optional
                     'createOrderDate': '2025-11-08T13:20:19.417Z',
                     'submitPriceDate': '2025-11-08T13:20:19.417Z',
                     'sendToPostDate': '2025-11-08T13:20:19.417Z',
@@ -702,10 +702,19 @@ class OrdersViewSet(viewsets.ModelViewSet):
         
         # Handle addressid - if provided and not 0, fetch address and use its fields
         addressid = validated_data.get('addressid', 0)
-        address1 = validated_data.get('address1', '')
-        address2 = validated_data.get('address2') or ''
-        phone1 = validated_data.get('phone1', '')
-        phone2 = validated_data.get('phone2') or ''
+        # Convert empty strings to None for nullable fields
+        address1 = validated_data.get('address1')
+        if address1 == '':
+            address1 = None
+        address2 = validated_data.get('address2')
+        if address2 == '':
+            address2 = None
+        phone1 = validated_data.get('phone1')
+        if phone1 == '':
+            phone1 = None
+        phone2 = validated_data.get('phone2')
+        if phone2 == '':
+            phone2 = None
         latitude = validated_data.get('latitude')
         longitude = validated_data.get('longitude')
         city = validated_data.get('city') or ''
@@ -716,10 +725,15 @@ class OrdersViewSet(viewsets.ModelViewSet):
             try:
                 address = Address.objects.get(id=addressid, user=user)
                 # Use address fields from saved address, but allow request fields to override
-                address1 = address1 or address.address or ''
-                address2 = address2 or ''
-                phone1 = phone1 or address.phone_number or ''
-                phone2 = phone2 or ''
+                # Only use saved address if request field is None or empty
+                if not address1:
+                    address1 = address.address if address.address else None
+                if not address2:
+                    address2 = address.address2 if hasattr(address, 'address2') and address.address2 else None
+                if not phone1:
+                    phone1 = address.phone_number if address.phone_number else None
+                if not phone2:
+                    phone2 = address.phone2 if hasattr(address, 'phone2') and address.phone2 else None
                 latitude = latitude if latitude is not None else address.latitude
                 longitude = longitude if longitude is not None else address.longitude
                 city = city or address.city or ''

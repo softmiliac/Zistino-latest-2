@@ -256,8 +256,9 @@ AUTH_USER_MODEL = 'authentication.User'
 # SMS Service Configuration - MeliPayamak (Priority Provider)
 MELIPAYAMAK_USERNAME = config('MELIPAYAMAK_USERNAME', default='')
 MELIPAYAMAK_API_KEY = config('MELIPAYAMAK_API_KEY', default='')  # API Key used as password
-# MELIPAYAMAK_API_URL = config('MELIPAYAMAK_API_URL', default='https://rest.payamak-panel.com/api/SendSMS/SendSMS')
+MELIPAYAMAK_API_URL = config('MELIPAYAMAK_API_URL', default='https://rest.payamak-panel.com/api/SendSMS/SendSMS')
 MELIPAYAMAK_SENDER = config('MELIPAYAMAK_SENDER', default='')  # Sender number
+MELIPAYAMAK_PATTERN_ID = config('MELIPAYAMAK_PATTERN_ID', default='')  # Pattern ID for notifications (alternative to free-form SMS)
 
 # Payamak BaseServiceNumber SMS Configuration (for OTP/Service messages)
 # This is the same API used in the PHP code for OTP/service messages
@@ -266,12 +267,7 @@ PAYAMAK_PASSWORD = config('PAYAMAK_PASSWORD', default='')
 PAYAMAK_BODY_ID = config('PAYAMAK_BODY_ID', default='')
 PAYAMAK_BASE_URL = config('PAYAMAK_BASE_URL', default='https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber')
 
-# SMS Service Configuration - Mizban SMS (Fallback Provider)
-# MIZBAN_SMS_USERNAME = config('MIZBAN_SMS_USERNAME', default='')
-# MIZBAN_SMS_PASSWORD = config('MIZBAN_SMS_PASSWORD', default='')
-# MIZBAN_SMS_API_URL = config('MIZBAN_SMS_API_URL', default='https://services.mizbansms.com/api/Message/SendMessage')
-# MIZBAN_SMS_SENDER = config('MIZBAN_SMS_SENDER', default='')  # Sender number/ID (if required)
-# MIZBAN_SMS_AUTH_TOKEN = config('MIZBAN_SMS_AUTH_TOKEN', default='')  # Authorization token/API key
+
 
 # Legacy SMS settings (kept for backward compatibility)
 SMS_SERVICE_API_KEY = config('SMS_SERVICE_API_KEY', default='')

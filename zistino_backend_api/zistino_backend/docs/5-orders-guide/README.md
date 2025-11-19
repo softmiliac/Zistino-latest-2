@@ -18,7 +18,7 @@ This guide covers order creation, viewing orders, waste weight tracking, and was
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -54,7 +54,7 @@ Authorization: Token your-token-here
 **cURL Example**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/weight-ranges/" \
-  -H "Authorization: Token your-token-here"
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -67,7 +67,7 @@ curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/weight-ranges/" \
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Query Parameters** (Optional):
@@ -108,7 +108,7 @@ Authorization: Token your-token-here
 **cURL Example**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/time-slots/?date=2025-01-16" \
-  -H "Authorization: Token your-token-here"
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -117,11 +117,11 @@ curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/time-slots/?date=2025-01-
 
 **Purpose**: Convert basket items into an order. Can include location (auto-assigns driver) and waste delivery request details.
 
-**Endpoint**: `POST /api/v1/orders/customer/orders/`
+**Endpoint**: `POST /api/v1/orders/`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 Content-Type: application/json
 ```
 
@@ -208,8 +208,8 @@ Content-Type: application/json
 
 **cURL Example**:
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/orders/customer/orders/" \
-  -H "Authorization: Token your-token-here" \
+curl -X POST "http://127.0.0.1:8000/api/v1/orders/" \
+  -H "Authorization: Bearer your-token-here" \
   -H "Content-Type: application/json" \
   -d '{
     "latitude": 35.6892,
@@ -228,11 +228,11 @@ curl -X POST "http://127.0.0.1:8000/api/v1/orders/customer/orders/" \
 
 **Purpose**: Get list of customer's orders (last 20 orders).
 
-**Endpoint**: `GET /api/v1/orders/customer/orders/`
+**Endpoint**: `POST /api/v1/orders/client/search` (for searching orders)
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -260,8 +260,10 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/orders/customer/orders/" \
-  -H "Authorization: Token your-token-here"
+curl -X POST "http://127.0.0.1:8000/api/v1/orders/client/search" \
+  -H "Authorization: Bearer your-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{"pageNumber": 1, "pageSize": 20}'
 ```
 
 ---
@@ -270,11 +272,11 @@ curl -X GET "http://127.0.0.1:8000/api/v1/orders/customer/orders/" \
 
 **Purpose**: Search customer orders with pagination and keyword filter.
 
-**Endpoint**: `POST /api/v1/orders/customer/orders/client/search/`
+**Endpoint**: `POST /api/v1/orders/client/search`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 Content-Type: application/json
 ```
 
@@ -306,8 +308,8 @@ Content-Type: application/json
 
 **cURL Example**:
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/v1/orders/customer/orders/client/search/" \
-  -H "Authorization: Token your-token-here" \
+curl -X POST "http://127.0.0.1:8000/api/v1/orders/client/search" \
+  -H "Authorization: Bearer your-token-here" \
   -H "Content-Type: application/json" \
   -d '{
     "pageNumber": 1,
@@ -322,11 +324,11 @@ curl -X POST "http://127.0.0.1:8000/api/v1/orders/customer/orders/client/search/
 
 **Purpose**: Get detailed information about a specific order.
 
-**Endpoint**: `GET /api/v1/orders/customer/orders/{order_id}/`
+**Endpoint**: `GET /api/v1/orders/{id}` or `GET /api/v1/orders/client/{id}`
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -355,8 +357,8 @@ Authorization: Token your-token-here
 
 **cURL Example**:
 ```bash
-curl -X GET "http://127.0.0.1:8000/api/v1/orders/customer/orders/46e818ce-0518-4c64-8438-27bc7163a706/" \
-  -H "Authorization: Token your-token-here"
+curl -X GET "http://127.0.0.1:8000/api/v1/orders/client/46e818ce-0518-4c64-8438-27bc7163a706" \
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -369,7 +371,7 @@ curl -X GET "http://127.0.0.1:8000/api/v1/orders/customer/orders/46e818ce-0518-4
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -388,7 +390,7 @@ Authorization: Token your-token-here
 **cURL Example**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/weight-summary/" \
-  -H "Authorization: Token your-token-here"
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -401,7 +403,7 @@ curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/weight-summary/" \
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Query Parameters** (Optional):
@@ -440,7 +442,7 @@ Authorization: Token your-token-here
 **cURL Example**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/weight-history/?page=1&page_size=20" \
-  -H "Authorization: Token your-token-here"
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
@@ -453,7 +455,7 @@ curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/weight-history/?page=1&pa
 
 **Headers**:
 ```
-Authorization: Token your-token-here
+Authorization: Bearer your-token-here
 ```
 
 **Request Body**: None
@@ -495,7 +497,7 @@ Authorization: Token your-token-here
 **cURL Example**:
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/orders/waste/orders/46e818ce-0518-4c64-8438-27bc7163a706/weights/" \
-  -H "Authorization: Token your-token-here"
+  -H "Authorization: Bearer your-token-here"
 ```
 
 ---
