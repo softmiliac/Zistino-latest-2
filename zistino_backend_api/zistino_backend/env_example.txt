@@ -1,0 +1,40 @@
+# Django Settings
+SECRET_KEY=django-insecure-change-this-in-production-please
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Database Settings
+DB_NAME=zistino_db
+DB_USER=postgres
+DB_PASSWORD=your-database-password
+DB_HOST=localhost
+DB_PORT=5432
+
+# Redis Settings
+REDIS_URL=redis://127.0.0.1:6379/1
+CELERY_BROKER_URL=redis://localhost:6379
+CELERY_RESULT_BACKEND=redis://localhost:6379
+
+# ============================================
+# SMS Settings - Payamak BaseServiceNumber (برای OTP)
+# ============================================
+# استفاده: فقط برای کدهای OTP (لاگین، بازیابی رمز)
+PAYAMAK_USERNAME=09155009664
+PAYAMAK_PASSWORD=f2b89fd9-5633-4623-92c1-b3a896639f76
+PAYAMAK_BODY_ID=270325
+
+# ============================================
+# SMS Settings - MeliPayamak (برای اعلان‌ها)
+# ============================================
+# استفاده: برای پیامک‌های آزاد (اعلان‌ها، قرعه‌کشی، کیف پول)
+MELIPAYAMAK_USERNAME=09155009664
+MELIPAYAMAK_API_KEY=f2b89fd9-5633-4623-92c1-b3a896639f76
+MELIPAYAMAK_SENDER=30008666009664
+MELIPAYAMAK_PATTERN_ID=395131
+
+# Email Settings (optional - for production)
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-email-password
