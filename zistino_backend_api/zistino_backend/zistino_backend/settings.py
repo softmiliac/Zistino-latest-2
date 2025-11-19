@@ -27,7 +27,12 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-produc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lambda v: [s.strip() for s in v.split(',')])
+# ✅ ALLOWED_HOSTS: هم از .env خوانده می‌شود، هم پیش‌فرض مناسب برای لوکال و رندر دارد
+ALLOWED_HOSTS = config(
+    'ALLOWED_HOSTS',
+    default='localhost,127.0.0.1,zistino-latest-2.onrender.com',
+    cast=lambda v: [s.strip() for s in v.split(',')]
+)
 
 
 # Application definition
@@ -192,20 +197,46 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'zistino_apps.compatibility.exceptions.compatibility_exception_handler',
 }
 
-# drf-spectacular settings
+# drf-spectacular settings (ترکیب نسخه‌ی قدیمی + نیازهای جدید)
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Zistino Backend API',
     'DESCRIPTION': 'API documentation for Zistino driver app and related services.',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
-    # Configure schemes - use http for local development
-    'SCHEMES': ['http'],
-    # Configure servers - only local server
+
+    # پروتکل‌ها
+    'SCHEMES': ['http', 'https'],
+
+    # سرورها: Render + لوکال
     'SERVERS': [
-        {'url': 'http://127.0.0.1:8000', 'description': 'Local development server'},
+        {"url": "https://zistino-latest-2.onrender.com", "description": "Render production"},
+        {"url": "http://127.0.0.1:8000", "description": "Local development server"},
+    ],
+
+    # تعریف نوع‌های احراز هویت که در Swagger دیده می‌شوند
+    'SECURITY_SCHEMES': {
+        # سشن جنگو
+        'cookieAuth': {
+            'type': 'apiKey',
+            'in': 'cookie',
+            'name': 'sessionid',
+        },
+        # JWT ما
+        'tokenAuth': {
+            'type': 'apiKey',
+            'in': 'header',
+            'name': 'Authorization',
+            'description': 'JWT token. Example: Bearer {your_token}',
+        },
+    },
+
+    # پیش‌فرض همه‌ی endpointها tokenAuth لازم دارند
+    'SECURITY': [
+        {'tokenAuth': []},
     ],
 }
+
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
@@ -217,6 +248,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:8080",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "https://zistino-latest-2.onrender.com",
 ]
 
 # Allow all origins in development (for Swagger UI and testing)
@@ -224,6 +256,10 @@ if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 else:
     CORS_ALLOW_ALL_ORIGINS = False
+    # در محیط production فقط دامنه‌ی Render اجازه دارد
+    CORS_ALLOWED_ORIGINS = [
+        "https://zistino-latest-2.onrender.com",
+    ]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -256,18 +292,21 @@ AUTH_USER_MODEL = 'authentication.User'
 # SMS Service Configuration - MeliPayamak (Priority Provider)
 MELIPAYAMAK_USERNAME = config('MELIPAYAMAK_USERNAME', default='')
 MELIPAYAMAK_API_KEY = config('MELIPAYAMAK_API_KEY', default='')  # API Key used as password
-MELIPAYAMAK_API_URL = config('MELIPAYAMAK_API_URL', default='https://rest.payamak-panel.com/api/SendSMS/SendSMS')
+MELIPAYAMAK_API_URL = config(
+    'MELIPAYAMAK_API_URL',
+    default='https://rest.payamak-panel.com/api/SendSMS/SendSMS'
+)
 MELIPAYAMAK_SENDER = config('MELIPAYAMAK_SENDER', default='')  # Sender number
-MELIPAYAMAK_PATTERN_ID = config('MELIPAYAMAK_PATTERN_ID', default='')  # Pattern ID for notifications (alternative to free-form SMS)
+MELIPAYAMAK_PATTERN_ID = config('MELIPAYAMAK_PATTERN_ID', default='')  # Pattern ID for notifications
 
 # Payamak BaseServiceNumber SMS Configuration (for OTP/Service messages)
-# This is the same API used in the PHP code for OTP/service messages
 PAYAMAK_USERNAME = config('PAYAMAK_USERNAME', default='')
 PAYAMAK_PASSWORD = config('PAYAMAK_PASSWORD', default='')
 PAYAMAK_BODY_ID = config('PAYAMAK_BODY_ID', default='')
-PAYAMAK_BASE_URL = config('PAYAMAK_BASE_URL', default='https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber')
-
-
+PAYAMAK_BASE_URL = config(
+    'PAYAMAK_BASE_URL',
+    default='https://rest.payamak-panel.com/api/SendSMS/BaseServiceNumber'
+)
 
 # Legacy SMS settings (kept for backward compatibility)
 SMS_SERVICE_API_KEY = config('SMS_SERVICE_API_KEY', default='')
