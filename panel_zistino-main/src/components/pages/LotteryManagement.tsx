@@ -1,5 +1,5 @@
 import { FC, useState } from "react";
-import { HiPencil, HiPlusSm, HiTrash, HiStar, HiStop, HiUsers } from "react-icons/hi";
+import { HiPencil, HiPlusSm, HiTrash, HiStar, HiStop, HiUsers, HiGift } from "react-icons/hi";
 import { toast } from "react-toastify";
 import { useFormik } from "formik";
 import { useTranslation } from "react-i18next";
@@ -25,6 +25,8 @@ import {
     useEndLottery,
     useLotteryParticipants,
     useLotteryEligibleDrivers,
+    useManualAwardPoints,
+    TextArea,
 } from "../../";
 
 const LotteryManagement: FC = () => {
@@ -34,7 +36,9 @@ const LotteryManagement: FC = () => {
     const [selectedLotteryId, setSelectedLotteryId] = useState<any>("");
     const [eligibleDriversModalVisible, setEligibleDriversModalVisible] = useState(false);
     const [selectedLotteryForEligibleDrivers, setSelectedLotteryForEligibleDrivers] = useState<string>("");
-    const [minPointsFilter, setMinPointsFilter] = useState<number>(0);
+    const [minPointsFilter, setMinPointsFilter] = useState<number>(1);
+    const [awardPointsModalVisible, setAwardPointsModalVisible] = useState(false);
+    const [selectedDriverForAward, setSelectedDriverForAward] = useState<any>(null);
 
     const { t } = useTranslation();
     const queryClient = useQueryClient();
@@ -45,6 +49,7 @@ const LotteryManagement: FC = () => {
     const updateLottery = useUpdateLottery(selectedLotteryId);
     const drawWinner = useDrawLotteryWinner();
     const endLottery = useEndLottery();
+    const awardPoints = useManualAwardPoints();
     const { data: eligibleDrivers, isLoading: loadingEligibleDrivers } = useLotteryEligibleDrivers(
         selectedLotteryForEligibleDrivers,
         minPointsFilter
@@ -132,6 +137,41 @@ const LotteryManagement: FC = () => {
         },
     });
 
+    const awardPointsFormik = useFormik({
+        initialValues: {
+            amount: "",
+            description: "",
+        },
+        validateOnChange: false,
+        validateOnBlur: false,
+        onSubmit: (values) => {
+            if (!selectedDriverForAward) return;
+            if (!values.amount || parseInt(values.amount) <= 0) {
+                errorAlert({ title: t("please_enter_valid_amount") || "لطفا مقدار معتبری وارد کنید" });
+                return;
+            }
+            awardPoints
+                .mutateAsync({
+                    userId: selectedDriverForAward.userId,
+                    amount: parseInt(values.amount),
+                    description: values.description || t("manual_award_by_admin") || "اعطای دستی توسط مدیر",
+                })
+                .then((response: any) => {
+                    awardPointsFormik.resetForm();
+                    setAwardPointsModalVisible(false);
+                    setSelectedDriverForAward(null);
+                    successAlert({
+                        title: `${t("points_awarded_successfully") || "امتیاز با موفقیت اعطا شد"} - ${t("new_balance") || "موجودی جدید"}: ${response?.new_balance || 0}`,
+                    });
+                    // Refresh eligible drivers list
+                    queryClient.invalidateQueries("lottery-eligible-drivers");
+                })
+                .catch((err: any) => {
+                    errorAlert({ title: err?.response?.data?.detail || err?.message || t("error_occurred") || "خطایی رخ داد" });
+                });
+        },
+    });
+
     if (isLoading) return <div>{t("loading")}</div>;
 
     const deleteHandler = (id: any) => {
@@ -169,6 +209,11 @@ const LotteryManagement: FC = () => {
     const showEligibleDrivers = (id: string) => {
         setSelectedLotteryForEligibleDrivers(id);
         setEligibleDriversModalVisible(true);
+    };
+
+    const showAwardPointsModal = (driver: any) => {
+        setSelectedDriverForAward(driver);
+        setAwardPointsModalVisible(true);
     };
 
     const columns: ColumnsType<any> = [
@@ -392,7 +437,7 @@ const LotteryManagement: FC = () => {
                 onCancel={() => {
                     setEligibleDriversModalVisible(false);
                     setSelectedLotteryForEligibleDrivers("");
-                    setMinPointsFilter(0);
+                    setMinPointsFilter(1);
                 }}
                 footer={[
                     <AntButton key="draw" type="primary" onClick={() => {
@@ -406,7 +451,7 @@ const LotteryManagement: FC = () => {
                     <AntButton key="cancel" onClick={() => {
                         setEligibleDriversModalVisible(false);
                         setSelectedLotteryForEligibleDrivers("");
-                        setMinPointsFilter(0);
+                        setMinPointsFilter(1);
                     }}>
                         {t("cancel")}
                     </AntButton>
@@ -417,10 +462,10 @@ const LotteryManagement: FC = () => {
                     <label className="block mb-2">{t("min_points") || "حداقل امتیاز"}:</label>
                     <Input
                         type="number"
-                        min={0}
+                        min={1}
                         value={minPointsFilter}
-                        onChange={(e) => setMinPointsFilter(parseInt(e.target.value) || 0)}
-                        placeholder="0"
+                        onChange={(e) => setMinPointsFilter(parseInt(e.target.value) || 1)}
+                        placeholder="1"
                     />
                 </div>
                 {loadingEligibleDrivers ? (
@@ -435,8 +480,13 @@ const LotteryManagement: FC = () => {
                                             <div className="font-semibold">{driver.userName || driver.userPhone}</div>
                                             <div className="text-sm text-gray-500">{driver.userPhone}</div>
                                         </div>
-                                        <div className="text-lg font-bold text-green-600">
-                                            {driver.points} {t("points") || "امتیاز"}
+                                        <div className="flex items-center gap-3">
+                                            <div className="text-lg font-bold text-green-600">
+                                                {driver.points} {t("points") || "امتیاز"}
+                                            </div>
+                                            <ActionIcon onClick={() => showAwardPointsModal(driver)}>
+                                                <HiGift className="text-xl text-blue-500" title={t("award_points") || "اعطای امتیاز"} />
+                                            </ActionIcon>
                                         </div>
                                     </div>
                                 ))}
@@ -450,6 +500,62 @@ const LotteryManagement: FC = () => {
                             </div>
                         )}
                     </div>
+                )}
+            </Modal>
+
+            {/* Award Points Modal */}
+            <Modal
+                title={t("award_points") || "اعطای امتیاز"}
+                open={awardPointsModalVisible}
+                onCancel={() => {
+                    setAwardPointsModalVisible(false);
+                    setSelectedDriverForAward(null);
+                    awardPointsFormik.resetForm();
+                }}
+                footer={[
+                    <AntButton key="cancel" onClick={() => {
+                        setAwardPointsModalVisible(false);
+                        setSelectedDriverForAward(null);
+                        awardPointsFormik.resetForm();
+                    }}>
+                        {t("cancel")}
+                    </AntButton>,
+                    <AntButton key="submit" type="primary" onClick={() => awardPointsFormik.handleSubmit()}>
+                        {t("award_points") || "اعطای امتیاز"}
+                    </AntButton>
+                ]}
+                width={500}
+            >
+                {selectedDriverForAward && (
+                    <form onSubmit={awardPointsFormik.handleSubmit} className="space-y-4">
+                        <div className="mb-4 p-3 bg-gray-100 dark:bg-gray-700 rounded">
+                            <div className="font-semibold">{selectedDriverForAward.userName || selectedDriverForAward.userPhone}</div>
+                            <div className="text-sm text-gray-500">{selectedDriverForAward.userPhone}</div>
+                            <div className="text-sm mt-1">
+                                {t("current_points") || "امتیاز فعلی"}: <span className="font-bold text-green-600">{selectedDriverForAward.points}</span>
+                            </div>
+                        </div>
+                        <Input
+                            label={t("amount") || "مقدار امتیاز"}
+                            name="amount"
+                            type="number"
+                            min={1}
+                            required
+                            onChange={awardPointsFormik.handleChange}
+                            value={awardPointsFormik.values.amount}
+                            error={awardPointsFormik.errors.amount}
+                            placeholder={t("enter_points_amount") || "مقدار امتیاز را وارد کنید"}
+                        />
+                        <TextArea
+                            label={t("description") || "توضیحات (اختیاری)"}
+                            name="description"
+                            rows={3}
+                            onChange={awardPointsFormik.handleChange}
+                            value={awardPointsFormik.values.description}
+                            error={awardPointsFormik.errors.description}
+                            placeholder={t("optional_description") || "توضیحات اختیاری..."}
+                        />
+                    </form>
                 )}
             </Modal>
         </>

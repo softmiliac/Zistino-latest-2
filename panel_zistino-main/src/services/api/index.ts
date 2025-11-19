@@ -18,6 +18,7 @@ export * from "./productSections";
 export * from "./blog";
 export * from "./menuLinks";
 export * from "./lottery";
+export { useManualAwardPoints, useDriversPointsList } from "./lottery";
 export * from "./referrals";
 export * from "./disapprovals";
 export * from "./driverPayoutTiers";

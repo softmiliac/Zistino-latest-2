@@ -43,6 +43,16 @@ const lottery = {
       keyword: keyword || "",
       source: source || "",
     }).then((res) => res.data),
+  // Admin drivers list with points
+  getDriversList: (page?: number, size?: number, keyword?: string) =>
+    post("/points/drivers-list", {
+      pageNumber: page || 1,
+      pageSize: size || 20,
+      keyword: keyword || "",
+    }).then((res) => res.data),
+  // Admin manual award points
+  manualAwardPoints: (data: { userId: string; amount: number; description?: string }) =>
+    post("/points/manual-award", data).then((res) => res.data),
   
   // Referrals endpoints
   getMyCode: () => get("/referrals/my-code").then((res) => res.data),
@@ -99,6 +109,17 @@ export const usePointsSearch = (page?: number, size?: number, keyword?: string, 
   return useQuery(
     ["points-search", page, size, keyword, source],
     () => lottery.searchPoints(page, size, keyword, source),
+    {
+      keepPreviousData: true,
+    }
+  );
+};
+
+// Admin drivers list with points hook
+export const useDriversPointsList = (page?: number, size?: number, keyword?: string) => {
+  return useQuery(
+    ["points-drivers-list", page, size, keyword],
+    () => lottery.getDriversList(page, size, keyword),
     {
       keepPreviousData: true,
     }
@@ -205,5 +226,19 @@ export const useLotteryEligibleDrivers = (id: string, minPoints?: number) => {
   return useQuery(["lottery-eligible-drivers", id, minPoints], () => lottery.getEligibleDrivers(id, minPoints), {
     enabled: !!id,
   });
+};
+
+export const useManualAwardPoints = () => {
+  const queryClient = useQueryClient();
+  return useMutation(
+    (data: { userId: string; amount: number; description?: string }) => lottery.manualAwardPoints(data),
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries("lottery-eligible-drivers");
+        queryClient.invalidateQueries("points-search");
+        queryClient.invalidateQueries("points-my-balance");
+      },
+    }
+  );
 };
 
