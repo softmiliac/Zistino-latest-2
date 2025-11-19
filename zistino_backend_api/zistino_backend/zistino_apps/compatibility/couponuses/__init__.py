@@ -1,2 +1,0 @@
-# CouponUses compatibility module
-

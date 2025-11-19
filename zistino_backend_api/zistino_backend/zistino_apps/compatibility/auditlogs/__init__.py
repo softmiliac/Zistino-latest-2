@@ -1,2 +1,0 @@
-# AuditLogs compatibility endpoints module
-

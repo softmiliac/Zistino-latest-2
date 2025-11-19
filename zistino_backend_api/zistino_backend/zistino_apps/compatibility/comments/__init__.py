@@ -1,2 +1,0 @@
-# Comments compatibility module
-

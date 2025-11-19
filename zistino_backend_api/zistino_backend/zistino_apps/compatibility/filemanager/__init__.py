@@ -1,2 +1,0 @@
-# FileManager compatibility module
-

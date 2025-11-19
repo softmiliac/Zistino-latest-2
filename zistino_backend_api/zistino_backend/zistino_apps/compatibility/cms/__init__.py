@@ -1,2 +1,0 @@
-# CMS compatibility module
-

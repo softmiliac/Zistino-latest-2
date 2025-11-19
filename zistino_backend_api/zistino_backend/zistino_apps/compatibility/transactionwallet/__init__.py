@@ -1,2 +1,0 @@
-# TransactionWallet compatibility layer
-
