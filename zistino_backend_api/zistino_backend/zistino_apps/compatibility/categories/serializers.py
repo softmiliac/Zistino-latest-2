@@ -6,6 +6,24 @@ from zistino_apps.products.models import Category
 import hashlib
 
 
+def get_category_integer_id_mapping(categories_queryset, base_id=11):
+    """
+    Create a mapping from Category UUID to sequential integer ID.
+    This ensures consistent integer IDs that match old Swagger format (11, 12, 13, ...).
+    
+    Args:
+        categories_queryset: QuerySet of Category objects (should be ordered)
+        base_id: Starting integer ID (default: 11 to match old Swagger)
+    
+    Returns:
+        dict: Mapping of {category_uuid: integer_id}
+    """
+    mapping = {}
+    for idx, category in enumerate(categories_queryset):
+        mapping[str(category.id)] = base_id + idx
+    return mapping
+
+
 class CategorySerializer(serializers.ModelSerializer):
     """Serializer for Category model."""
     imageUrl = serializers.SerializerMethodField()
@@ -188,12 +206,19 @@ class CategoryClientSerializer(serializers.ModelSerializer):
         """Convert to old Swagger format."""
         data = super().to_representation(instance)
         
-        # Convert UUID id to integer hash for compatibility with old Swagger
+        # Convert UUID id to sequential integer ID for compatibility with old Swagger
+        # Use mapping from context if available, otherwise fall back to hash
         if 'id' in data and data['id']:
             uuid_str = str(data['id'])
-            hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
-            hash_int = int(hash_obj.hexdigest(), 16)
-            data['id'] = hash_int % 2147483647  # Max 32-bit integer
+            # Check if mapping is available in context
+            mapping = self.context.get('category_id_mapping', {})
+            if uuid_str in mapping:
+                data['id'] = mapping[uuid_str]
+            else:
+                # Fallback to hash if mapping not available
+                hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                hash_int = int(hash_obj.hexdigest(), 16)
+                data['id'] = hash_int % 2147483647  # Max 32-bit integer
         
         return data
 

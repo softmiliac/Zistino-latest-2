@@ -581,11 +581,20 @@ class ProductAdminSearchExtResponseSerializer(serializers.Serializer):
     def get_categories(self, obj):
         """Get categories as JSON string array format: '[{\"id\":\"...\", \"name\":\"...\"}]'."""
         if obj.category:
-            # Return JSON string format matching ProductCompatibilitySerializer
-            # Format: "[{\"id\":\"uuid-string\", \"name\":\"category-name\"}]"
             import json
+            # Get category ID mapping from context if available
+            category_id_mapping = self.context.get('category_id_mapping', {})
+            category_uuid_str = str(obj.category.id)
+            
+            # Use integer ID from mapping if available, otherwise use UUID string
+            if category_uuid_str in category_id_mapping:
+                category_id = category_id_mapping[category_uuid_str]
+            else:
+                # Fallback to UUID string if mapping not available
+                category_id = category_uuid_str
+            
             category_data = [{
-                "id": str(obj.category.id),
+                "id": str(category_id),  # Convert to string to match old Swagger format
                 "name": obj.category.name
             }]
             return json.dumps(category_data)

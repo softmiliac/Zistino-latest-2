@@ -894,9 +894,27 @@ class CategoriesClientByTypeView(APIView):
                 errors={'type': [f'Invalid type: {type}. Expected integer.']}
             )
         
-        # Filter categories by type
-        categories = Category.objects.filter(type=type_int, is_active=True).order_by('name')
-        serializer = CategoryClientSerializer(categories, many=True, context={'request': request})
+        # Filter categories by type and order by creation date for consistent sequential IDs
+        categories = Category.objects.filter(type=type_int, is_active=True).order_by('created_at', 'name')
+        
+        # Create UUID -> integer ID mapping for consistent sequential IDs (11, 12, 13, ...)
+        # Use global mapping (all categories) to ensure consistent IDs across all types
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+        
+        # Create per-type mapping for this response
+        category_id_mapping = {str(cat.id): global_category_id_mapping.get(str(cat.id)) 
+                               for cat in categories if str(cat.id) in global_category_id_mapping}
+        
+        serializer = CategoryClientSerializer(
+            categories, 
+            many=True, 
+            context={
+                'request': request,
+                'category_id_mapping': category_id_mapping
+            }
+        )
         return create_success_response(data=serializer.data)
 
 

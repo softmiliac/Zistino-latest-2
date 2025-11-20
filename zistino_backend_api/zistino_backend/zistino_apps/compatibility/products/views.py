@@ -3375,19 +3375,69 @@ class ProductsClientByCategoryTypeView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request, id):
-        """Get products by category type. Returns format matching old Swagger."""
-        # TODO: Implement category type filtering when category type is defined
+        """Get products by category ID. Returns format matching old Swagger."""
+        from zistino_apps.products.models import Category
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        
         page_number = int(request.data.get('pageNumber', 1))
         page_size = int(request.data.get('pageSize', 20))
 
-        qs = Product.objects.filter(is_active=True)
+        # Convert integer ID to category UUID
+        try:
+            category_id_int = int(id)
+        except (ValueError, TypeError):
+            return create_error_response(
+                error_message=f'Invalid category ID: {id}. Expected integer.',
+                status_code=status.HTTP_400_BAD_REQUEST,
+                errors={'id': [f'Invalid category ID: {id}. Expected integer.']}
+            )
+        
+        # Find category by integer ID using the same global mapping logic
+        # Get all active categories ordered by created_at (same as CategoriesClientByTypeView)
+        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+        reverse_mapping = {v: k for k, v in global_category_id_mapping.items()}
+        
+        # Get category UUID from integer ID
+        category_uuid_str = reverse_mapping.get(category_id_int)
+        if not category_uuid_str:
+            # Category not found with this integer ID
+            return create_success_response(data=[], messages=[], status_code=status.HTTP_200_OK)
+        
+        try:
+            category_uuid = uuid.UUID(category_uuid_str)
+        except (ValueError, TypeError):
+            return create_error_response(
+                error_message=f'Invalid category UUID: {category_uuid_str}',
+                status_code=status.HTTP_400_BAD_REQUEST,
+                errors={'id': [f'Invalid category UUID: {category_uuid_str}']}
+            )
+        
+        # Get category to determine its type
+        try:
+            category = Category.objects.get(id=category_uuid)
+        except Category.DoesNotExist:
+            return create_success_response(data=[], messages=[], status_code=status.HTTP_200_OK)
+        
+        # Filter products by category
+        qs = Product.objects.filter(category_id=category_uuid, is_active=True)
         
         start = (page_number - 1) * page_size
         end = start + page_size
         items = qs[start:end]
 
+        # Create category ID mapping for serializer context (use global mapping)
+        category_id_mapping_for_serializer = global_category_id_mapping
+
         # Use ProductAdminSearchExtResponseSerializer for output (matching top5 format)
-        product_serializer = ProductAdminSearchExtResponseSerializer(items, many=True, context={'request': request})
+        product_serializer = ProductAdminSearchExtResponseSerializer(
+            items, 
+            many=True, 
+            context={
+                'request': request,
+                'category_id_mapping': category_id_mapping_for_serializer
+            }
+        )
         
         # Return simple format (no pagination fields, matching old Swagger)
         return create_success_response(data=product_serializer.data)
