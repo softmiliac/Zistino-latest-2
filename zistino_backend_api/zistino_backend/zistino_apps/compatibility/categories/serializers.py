@@ -258,3 +258,4 @@ class CategorySearchRequestSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False, allow_null=True, help_text='Category ID filter')
     type = serializers.IntegerField(required=False, allow_null=True, help_text='Category type filter')
 
+#new comment
