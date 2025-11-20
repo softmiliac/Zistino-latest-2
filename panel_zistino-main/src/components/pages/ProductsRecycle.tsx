@@ -169,9 +169,27 @@ const ProductsRecycle: FC = () => {
     validateOnBlur: false,
     enableReinitialize: false,
     onSubmit: (values: any) => {
-      values.categories = JSON.stringify([{ id: values.category, type: 2 }]);
-      values.categoryIds = [values.category];
+      // Validation: بررسی اینکه category انتخاب شده است
+      if (!values.category || values.category === "") {
+        errorAlert({ title: t("please_select_category") || "لطفا دسته بندی را انتخاب کنید" });
+        return;
+      }
+
+      // Backend می‌تواند integer ID را در categoryIds handle کند (با sequential mapping)
+      // پس category را حذف می‌کنیم و فقط categoryIds را می‌فرستیم
+      const categoryId = values.category; // ذخیره category قبل از حذف
+
+      // Debug: Log categoryId
+      console.log('DEBUG ProductsRecycle: categoryId =', categoryId, 'type =', typeof categoryId);
+
+      delete values.category; // حذف category از values تا backend فقط categoryIds را چک کند
+      values.categories = JSON.stringify([{ id: categoryId, type: 2 }]);
+      // اطمینان از اینکه categoryId به string تبدیل می‌شود (backend انتظار string دارد)
+      values.categoryIds = [String(categoryId)]; // Backend می‌تواند integer ID را در categoryIds handle کند
       values.imagesList = JSON.stringify([values.masterImage]);
+
+      // Debug: Log final values
+      console.log('DEBUG ProductsRecycle: Final values.categoryIds =', values.categoryIds);
 
       createProduct
         .mutateAsync(values)
@@ -184,9 +202,41 @@ const ProductsRecycle: FC = () => {
           setTagData([]);
           setSelectedSp("");
           setSelectedSpData("");
+          successAlert({ title: t("product_created_successfully") || "پسماند با موفقیت ایجاد شد" });
         })
         .catch((err) => {
-          /*errorAlert({ title: err?.message })*/
+          console.error('DEBUG ProductsRecycle: Error creating product:', err);
+          console.error('DEBUG ProductsRecycle: Error response:', err?.response?.data);
+          console.error('DEBUG ProductsRecycle: Error response status:', err?.response?.status);
+
+          // نمایش تمام اطلاعات error
+          let errorMessage = t("error_occurred") || "خطایی رخ داد";
+
+          if (err?.response?.data) {
+            const errorData = err.response.data;
+
+            // بررسی انواع مختلف error format
+            if (errorData.error && Array.isArray(errorData.error)) {
+              errorMessage = errorData.error[0];
+            } else if (errorData.errors && typeof errorData.errors === 'object') {
+              // اگر errors یک object است، اولین error را نمایش بده
+              const firstErrorKey = Object.keys(errorData.errors)[0];
+              const firstError = errorData.errors[firstErrorKey];
+              if (Array.isArray(firstError)) {
+                errorMessage = firstError[0];
+              } else {
+                errorMessage = firstError;
+              }
+            } else if (errorData.message) {
+              errorMessage = errorData.message;
+            } else if (errorData.error_message) {
+              errorMessage = errorData.error_message;
+            }
+          } else if (err?.message) {
+            errorMessage = err.message;
+          }
+
+          errorAlert({ title: errorMessage });
         });
     },
   });
@@ -218,8 +268,12 @@ const ProductsRecycle: FC = () => {
     validateOnBlur: false,
     enableReinitialize: true,
     onSubmit: (values: any) => {
-      values.categories = JSON.stringify([{ id: values.category }]);
-      values.categoryIds = [values.category];
+      // Backend می‌تواند integer ID را در categoryIds handle کند (با sequential mapping)
+      // پس category را حذف می‌کنیم و فقط categoryIds را می‌فرستیم
+      const categoryId = values.category; // ذخیره category قبل از حذف
+      delete values.category; // حذف category از values تا backend فقط categoryIds را چک کند
+      values.categories = JSON.stringify([{ id: categoryId, type: 2 }]);
+      values.categoryIds = [categoryId]; // Backend می‌تواند integer ID را در categoryIds handle کند
       values.imagesList = JSON.stringify([values.masterImage]);
       updateProduct
         .mutateAsync(values)

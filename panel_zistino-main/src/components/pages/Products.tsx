@@ -41,8 +41,14 @@ const Products: FC = () => {
   const [tagData, setTagData] = useState<any>([]);
 
   const { t } = useTranslation();
+  const [viewCategoryType, setViewCategoryType] = useState<number>(1);
   // relations
-  const { data: categories } = useCategoryByType(1);
+  const { data: categoriesType1 } = useCategoryByType(1);
+  const { data: categoriesType2 } = useCategoryByType(2);
+  const categoriesAll = [
+    ...(categoriesType1?.data?.map((c: any) => ({ ...c, type: 1 })) || []),
+    ...(categoriesType2?.data?.map((c: any) => ({ ...c, type: 2 })) || []),
+  ];
   const { data: specifications } = useSpecifications();
 
   const [selectedProductId, setSelectedProductId] = useState("");
@@ -54,6 +60,16 @@ const Products: FC = () => {
   const [selectedSpData, setSelectedSpData] = useState("");
 
   const [priceItem, setPriceItem] = useState<any>([]);
+  const parseCategoryValue = (value: string): { id: string; type: number } => {
+    if (!value) {
+      return { id: "", type: 1 };
+    }
+    const [typePart, ...idParts] = value.split("|");
+    const id = idParts.join("|");
+    const type = Number(typePart) || 1;
+    return { id, type };
+  };
+
   const columns: ColumnsType<any> = [
     {
       title: t("Product Name"),
@@ -63,16 +79,18 @@ const Products: FC = () => {
       title: t("category"),
       dataIndex: "categories",
       render(value) {
-        let parsedValue;
+        let parsedValue: any;
         try {
           parsedValue = typeof value === 'string' ? JSON.parse(value) : value;
         } catch (e) {
           parsedValue = [];
         }
-        const name = categories?.data?.find(
-          (x: any) => +x.id === +parsedValue?.[0]?.id
+        const firstCategory = parsedValue?.[0];
+        if (!firstCategory) return "";
+        const match = categoriesAll.find(
+          (x) => String(x.id) === String(firstCategory.id)
         );
-        return name?.name;
+        return match ? `${match.name} ${match.type === 1 ? '(نوع ۱)' : '(نوع ۲)'}` : firstCategory?.name || "";
       },
     },
     {
@@ -128,7 +146,7 @@ const Products: FC = () => {
     data: productsClient,
     isLoading,
     isFetching,
-  } = useProductsByCategoryType(page, perPage, searchValue, 1);
+  } = useProductsByCategoryType(page, perPage, searchValue, viewCategoryType);
   const products = productsClient?.data;
 
   //   const { data: warranties } = useWarranties();
@@ -175,17 +193,20 @@ const Products: FC = () => {
     validateOnBlur: false,
     enableReinitialize: false,
     onSubmit: (values: any) => {
-      // Validate category is selected
-      if (!values.category || values.category === "") {
+      const { id, type } = parseCategoryValue(values.category);
+      if (!id) {
         errorAlert({ title: t("please_select_category") || "لطفا دسته بندی را انتخاب کنید" });
         return;
       }
 
-      values.categories = JSON.stringify([{ id: values.category, type: 1 }]);
-      values.categoryIds = [values.category];
+      // محصول همیشه type=1 است، اما دسته‌بندی می‌تواند type=1 یا type=2 باشد
+      // دسته‌بندی‌های type=2 از منوی "دسته بندی پسماند" ایجاد می‌شوند
+      // Backend می‌تواند integer ID را در categoryIds handle کند (با hash lookup)
+      // پس category را حذف می‌کنیم و فقط categoryIds را می‌فرستیم
+      delete values.category; // حذف category از values تا backend فقط categoryIds را چک کند
+      values.categories = JSON.stringify([{ id, type }]);
+      values.categoryIds = [id]; // Backend می‌تواند integer ID را در categoryIds handle کند
       values.imagesList = JSON.stringify([values.masterImage]);
-
-      // Debug: Log inStock value before sending
 
       createProduct
         .mutateAsync(values)
@@ -212,9 +233,14 @@ const Products: FC = () => {
       description: selectedProduct?.description,
       category: (() => {
         try {
-          return JSON.parse(selectedProduct?.categories ?? "[]")?.[0]?.id;
+          const parsed = JSON.parse(selectedProduct?.categories ?? "[]");
+          const first = parsed?.[0];
+          if (!first) return "";
+          // استفاده از type دسته‌بندی از خود داده (نه viewCategoryType)
+          const catType = first?.type || 1;
+          return `${catType}|${first.id}`;
         } catch (e) {
-          return undefined;
+          return "";
         }
       })(),
       masterPrice: selectedProduct?.masterPrice,
@@ -233,11 +259,19 @@ const Products: FC = () => {
     validateOnBlur: false,
     enableReinitialize: true,
     onSubmit: (values: any) => {
-      values.categories = JSON.stringify([{ id: values.category }]);
-      values.categoryIds = [values.category];
+      const { id, type } = parseCategoryValue(values.category);
+      if (!id) {
+        errorAlert({ title: t("please_select_category") || "لطفا دسته بندی را انتخاب کنید" });
+        return;
+      }
+      // محصول همیشه type=1 است، اما دسته‌بندی می‌تواند type=1 یا type=2 باشد
+      // دسته‌بندی‌های type=2 از منوی "دسته بندی پسماند" ایجاد می‌شوند
+      // Backend می‌تواند integer ID را در categoryIds handle کند (با hash lookup)
+      // پس category را حذف می‌کنیم و فقط categoryIds را می‌فرستیم
+      delete values.category; // حذف category از values تا backend فقط categoryIds را چک کند
+      values.categories = JSON.stringify([{ id, type }]);
+      values.categoryIds = [id]; // Backend می‌تواند integer ID را در categoryIds handle کند
       values.imagesList = JSON.stringify([values.masterImage]);
-
-      // Debug: Log what we're sending
 
       updateProduct
         .mutateAsync(values)
@@ -268,6 +302,9 @@ const Products: FC = () => {
   useEffect(() => {
     setPage(1);
   }, [searchValue]);
+  useEffect(() => {
+    setPage(1);
+  }, [viewCategoryType]);
 
   useEffect(() => {
     createFormik.setFieldValue("masterImage", uploadedImages);
@@ -375,7 +412,20 @@ const Products: FC = () => {
         <h2 className="text-[1.4rem] font-semibold rtl:font-rtl-semibold">
           {t("products")}
         </h2>
-        <div className="flex justify-between md:justify-end items-center space-x-4 rtl:space-x-reverse">
+        <div className="flex flex-wrap gap-4 items-center justify-between md:justify-end">
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-500 dark:text-gray-300 mb-1">
+              {t("category_type") || "نوع نمایش"}
+            </span>
+            <select
+              className="select select-bordered select-sm w-48"
+              value={viewCategoryType}
+              onChange={(e) => setViewCategoryType(Number(e.target.value))}
+            >
+              <option value={1}>{t("category_type_product") || "محصولات (نوع ۱)"}</option>
+              <option value={2}>{t("category_type_waste") || "پسماندها (نوع ۲)"}</option>
+            </select>
+          </div>
           <Input
             placeholder={t("search")}
             className="md:w-[280px] w-full"
@@ -563,12 +613,24 @@ const Products: FC = () => {
             error={createFormik.errors.category}
           >
             <option value="">{t("select")}</option>
-            {categories?.data?.map((category: any) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
+            <optgroup label={t("category_type_product") || "دسته‌های نوع ۱ (محصول)"}>
+              {categoriesType1?.data?.map((category: any) => (
+                <option key={category.id} value={`1|${category.id}`}>
+                  {category.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={t("category_type_waste") || "دسته‌های نوع ۲ (پسماند) - از منوی 'دسته بندی پسماند' ایجاد شده‌اند"}>
+              {categoriesType2?.data?.map((category: any) => (
+                <option key={category.id} value={`2|${category.id}`}>
+                  {category.name}
+                </option>
+              ))}
+            </optgroup>
           </Select>
+          <p className="text-xs text-gray-500 dark:text-gray-300">
+            {t("category_type_hint") || "می‌توانید از دسته‌های نوع ۱ (محصول) یا دسته‌های نوع ۲ (پسماند) که در منوی 'مدیریت پسماند > دسته بندی پسماند' ایجاد شده‌اند، انتخاب کنید."}
+          </p>
 
           <div>
             <label className="label mb-2">
@@ -699,12 +761,24 @@ const Products: FC = () => {
             error={updateFormik.errors.category}
           >
             <option value="">{t("select")}</option>
-            {categories?.data?.map((category: any) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
+            <optgroup label={t("category_type_product") || "دسته‌های نوع ۱ (محصول)"}>
+              {categoriesType1?.data?.map((category: any) => (
+                <option key={category.id} value={`1|${category.id}`}>
+                  {category.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={t("category_type_waste") || "دسته‌های نوع ۲ (پسماند) - از منوی 'دسته بندی پسماند' ایجاد شده‌اند"}>
+              {categoriesType2?.data?.map((category: any) => (
+                <option key={category.id} value={`2|${category.id}`}>
+                  {category.name}
+                </option>
+              ))}
+            </optgroup>
           </Select>
+          <p className="text-xs text-gray-500 dark:text-gray-300 mb-2">
+            {t("category_type_hint") || "می‌توانید از دسته‌های نوع ۱ (محصول) یا دسته‌های نوع ۲ (پسماند) که در منوی 'مدیریت پسماند > دسته بندی پسماند' ایجاد شده‌اند، انتخاب کنید."}
+          </p>
 
           <div>
             <label className="label mb-2">

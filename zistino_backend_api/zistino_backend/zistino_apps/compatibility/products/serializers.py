@@ -228,10 +228,19 @@ class ProductCompatibilitySerializer(serializers.ModelSerializer):
     def get_categories(self, obj):
         """Get categories as JSON string array format: '[{\"id\":\"6\"}]'."""
         if obj.category:
-            # Old Swagger format: "[{\"id\":\"6\"}]"
-            # Category ID is UUID, but old Swagger expects integer or string ID
-            # For now, use a placeholder or convert UUID to string
-            category_data = [{"id": str(obj.category.id)}]
+            import json
+            # Get category ID mapping from context if available
+            category_id_mapping = self.context.get('category_id_mapping', {})
+            category_uuid_str = str(obj.category.id)
+            
+            # Use integer ID from mapping if available, otherwise use UUID string
+            if category_uuid_str in category_id_mapping:
+                category_id = category_id_mapping[category_uuid_str]
+            else:
+                # Fallback to UUID string if mapping not available
+                category_id = category_uuid_str
+            
+            category_data = [{"id": str(category_id)}]
             return json.dumps(category_data)
         return None
 
