@@ -39,13 +39,31 @@ from .serializers import (
 )
 
 
+def sanitize_order_by(order_by_list):
+    """
+    Sanitize orderBy list by filtering out invalid values.
+    Returns a clean list or None if all values are invalid.
+    """
+    if not order_by_list:
+        return None
+    
+    # Filter out empty strings, None values, and invalid single characters
+    valid_fields = [field for field in order_by_list 
+                   if field and isinstance(field, str) and field.strip() and len(field.strip()) > 1]
+    
+    return valid_fields if valid_fields else None
+
+
 def apply_order_by(qs, order_by_list):
     """
     Apply orderBy logic to queryset.
     Supports: MostLikes, MostComments, Newest, OrdersCount, PriceASC, PriceDESC,
     lastModified, NameASC, NameDESC, Oldest (case-insensitive)
     """
-    if not order_by_list or len(order_by_list) == 0:
+    # Sanitize order_by_list first
+    order_by_list = sanitize_order_by(order_by_list)
+    
+    if not order_by_list:
         return qs.order_by('-created_at')
     
     ordering = []
@@ -64,9 +82,9 @@ def apply_order_by(qs, order_by_list):
     
     # Second pass: build ordering list
     for order_field in order_by_list:
-        if not order_field:
+        if not order_field or not isinstance(order_field, str):
             continue
-        order_field_lower = order_field.lower()
+        order_field_lower = order_field.lower().strip()
         
         if order_field_lower == 'mostlikes':
             # TODO: Implement when Like model has product relationship
@@ -94,21 +112,80 @@ def apply_order_by(qs, order_by_list):
         elif order_field_lower == 'namedesc':
             ordering.append('-name')
         else:
-            # Try to use as-is (might be a direct field name)
-            # Validate that the field exists in the model to avoid FieldError
-            field_name = order_field.lstrip('-')
-            # List of valid Product model fields
-            valid_product_fields = [
-                'id', 'name', 'description', 'price_per_unit', 'unit', 'in_stock', 
-                'is_active', 'created_at', 'category', 'category_id'
-            ]
-            # Also check if it's a common invalid value like "string" (from Swagger examples)
-            if field_name.lower() in ['string', '']:
-                # Skip invalid placeholder values
+            # Only try to use as-is if it's a valid Django field name
+            # Check if it's a valid field to avoid FieldError
+            try:
+                # Validate field name by checking if it exists in model
+                from zistino_apps.products.models import Product
+                if hasattr(Product, order_field) or order_field.startswith('-') and hasattr(Product, order_field[1:]):
+                    ordering.append(order_field)
+                else:
+                    # Invalid field, skip it
+                    continue
+            except Exception:
+                # If validation fails, skip this field
                 continue
-            elif field_name in valid_product_fields:
-                ordering.append(order_field)
-            # If not in valid fields, skip it silently (don't add to ordering)
+    
+    if ordering:
+        return qs.order_by(*ordering)
+    return qs.order_by('-created_at')
+    
+    # First pass: check if we need annotations
+    for order_field in valid_order_fields:
+        order_field_lower = order_field.lower() if order_field else ''
+        if order_field_lower == 'mostcomments':
+            needs_comment_count = True
+            break
+    
+    # Apply annotations if needed
+    if needs_comment_count:
+        qs = qs.annotate(comment_count=Count('comments'))
+    
+    # Second pass: build ordering list
+    for order_field in valid_order_fields:
+        if not order_field or not isinstance(order_field, str):
+            continue
+        order_field_lower = order_field.lower().strip()
+        
+        if order_field_lower == 'mostlikes':
+            # TODO: Implement when Like model has product relationship
+            # For now, order by created_at
+            ordering.append('-created_at')
+        elif order_field_lower == 'mostcomments':
+            ordering.append('-comment_count')
+        elif order_field_lower == 'newest':
+            ordering.append('-created_at')
+        elif order_field_lower == 'oldest':
+            ordering.append('created_at')
+        elif order_field_lower == 'orderscount':
+            # TODO: Implement when OrderItem has product ForeignKey
+            # For now, order by created_at
+            ordering.append('-created_at')
+        elif order_field_lower == 'priceasc':
+            ordering.append('price_per_unit')
+        elif order_field_lower == 'pricedesc':
+            ordering.append('-price_per_unit')
+        elif order_field_lower == 'lastmodified':
+            # Assuming updated_at exists, if not use created_at
+            ordering.append('-created_at')
+        elif order_field_lower == 'nameasc':
+            ordering.append('name')
+        elif order_field_lower == 'namedesc':
+            ordering.append('-name')
+        else:
+            # Only try to use as-is if it's a valid Django field name
+            # Check if it's a valid field to avoid FieldError
+            try:
+                # Validate field name by checking if it exists in model
+                from zistino_apps.products.models import Product
+                if hasattr(Product, order_field) or order_field.startswith('-') and hasattr(Product, order_field[1:]):
+                    ordering.append(order_field)
+                else:
+                    # Invalid field, skip it
+                    continue
+            except Exception:
+                # If validation fails, skip this field
+                continue
     
     if ordering:
         return qs.order_by(*ordering)
@@ -280,8 +357,23 @@ class ProductsViewSet(viewsets.ModelViewSet):
     )
     def list(self, request, *args, **kwargs):
         """List all products. Returns format matching old Swagger."""
+        from zistino_apps.products.models import Category
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        
         queryset = self.filter_queryset(self.get_queryset())
-        serializer = ProductCompatibilitySerializer(queryset, many=True, context={'request': request})
+        
+        # Get category ID mapping for serializer context (use sequential IDs)
+        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+        
+        serializer = ProductCompatibilitySerializer(
+            queryset, 
+            many=True, 
+            context={
+                'request': request,
+                'category_id_mapping': global_category_id_mapping
+            }
+        )
         return create_success_response(data=serializer.data)
 
     @extend_schema(
@@ -304,8 +396,22 @@ class ProductsViewSet(viewsets.ModelViewSet):
     )
     def retrieve(self, request, *args, **kwargs):
         """Retrieve a product by ID. Returns format matching old Swagger."""
+        from zistino_apps.products.models import Category
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        
         instance = self.get_object()
-        serializer = ProductCompatibilitySerializer(instance, context={'request': request})
+        
+        # Get category ID mapping for serializer context (use sequential IDs)
+        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+        
+        serializer = ProductCompatibilitySerializer(
+            instance, 
+            context={
+                'request': request,
+                'category_id_mapping': global_category_id_mapping
+            }
+        )
         return create_success_response(data=serializer.data)
 
     @extend_schema(
@@ -444,33 +550,38 @@ class ProductsViewSet(viewsets.ModelViewSet):
                 except (ValueError, TypeError, AttributeError):
                     return False
             
-            # Helper function to find category by integer ID (using sequential mapping)
-            def find_category_by_integer_id(integer_id):
+            # Helper function to find category by integer hash
+            def find_category_by_hash(hash_id):
+                try:
+                    import hashlib
+                    all_categories = Category.objects.all()
+                    for cat in all_categories:
+                        uuid_str = str(cat.id)
+                        hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                        hash_int = int(hash_obj.hexdigest(), 16)
+                        cat_hash_id = hash_int % 2147483647
+                        if cat_hash_id == hash_id:
+                            return cat
+                except Exception:
+                    pass
+                return None
+            
+            # Helper function to find category by sequential integer ID (from client endpoint)
+            def find_category_by_sequential_id(seq_id):
+                """Find category by sequential integer ID (11, 12, 13...) from client endpoint."""
                 try:
                     from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
-                    # Get all active categories for mapping (same as CategoriesClientByTypeView)
                     all_categories = Category.objects.filter(is_active=True).order_by('created_at', 'name')
-                    # Generate mapping
-                    mapping = get_category_integer_id_mapping(all_categories, base_id=11)
-                    # Create reverse mapping (integer_id -> uuid_str)
-                    reverse_mapping = {v: k for k, v in mapping.items()}
-                    # Find UUID by integer ID
-                    uuid_str = reverse_mapping.get(integer_id)
+                    category_id_mapping = get_category_integer_id_mapping(all_categories, base_id=11)
+                    # Reverse mapping: sequential_id -> uuid_string
+                    reverse_mapping = {v: k for k, v in category_id_mapping.items()}
+                    uuid_str = reverse_mapping.get(seq_id)
                     if uuid_str:
                         try:
-                            category_uuid = uuid.UUID(uuid_str)
-                            category = Category.objects.get(id=category_uuid)
-                            print(f'DEBUG: Found category by integer ID {integer_id}: {category.id}, name: {category.name}, is_active: {category.is_active}')
-                            return category
-                        except (ValueError, TypeError, Category.DoesNotExist) as e:
-                            print(f'DEBUG: Error getting category by UUID {uuid_str}: {e}')
+                            return Category.objects.get(id=uuid_str)
+                        except Category.DoesNotExist:
                             pass
-                    else:
-                        print(f'DEBUG: No UUID found for integer ID {integer_id} in reverse mapping. Available IDs: {list(reverse_mapping.keys())[:10]}...')
-                except Exception as e:
-                    print(f'DEBUG: Error in find_category_by_integer_id: {e}')
-                    import traceback
-                    print(f'DEBUG: Traceback: {traceback.format_exc()}')
+                except Exception:
                     pass
                 return None
             
@@ -498,15 +609,22 @@ class ProductsViewSet(viewsets.ModelViewSet):
                             print(f'DEBUG: Category with UUID {first_id} does not exist')
                             pass
                     else:
-                        # Not a UUID, try integer ID lookup (using sequential mapping)
-                        print(f'DEBUG: {first_id} is not a valid UUID, trying integer ID lookup')
+                        # Not a UUID, try sequential ID lookup first, then hash lookup
+                        print(f'DEBUG: {first_id} is not a valid UUID, trying sequential ID lookup')
                         try:
                             first_id_int = int(first_id)
-                            category = find_category_by_integer_id(first_id_int)
+                            # Try sequential ID lookup first (for client endpoints - 11, 12, 13...)
+                            category = find_category_by_sequential_id(first_id_int)
                             if category:
-                                print(f'DEBUG: Found category by integer ID {first_id_int}: {category.id}, name: {category.name}')
+                                print(f'DEBUG: Found category by sequential ID {first_id_int}: {category.id}, name: {category.name}')
                             else:
-                                print(f'DEBUG: No category found with integer ID {first_id_int}')
+                                # Fallback to hash lookup (for admin endpoints - hash IDs)
+                                print(f'DEBUG: No category found with sequential ID {first_id_int}, trying hash lookup')
+                                category = find_category_by_hash(first_id_int)
+                                if category:
+                                    print(f'DEBUG: Found category by hash {first_id_int}: {category.id}, name: {category.name}')
+                                else:
+                                    print(f'DEBUG: No category found with hash {first_id_int}')
                         except (ValueError, TypeError) as e:
                             print(f'DEBUG: Error converting {first_id} to int: {e}')
                             pass
@@ -525,15 +643,25 @@ class ProductsViewSet(viewsets.ModelViewSet):
                             errors={'category': [f'Invalid category ID "{category_id_str}" - category does not exist.']}
                         )
                 else:
-                    # Not a UUID, try integer ID lookup (using sequential mapping)
+                    # Not a UUID, try sequential ID lookup first, then hash lookup
                     try:
                         category_id_int = int(category_id_str)
-                        category = find_category_by_integer_id(category_id_int)
+                        # Try sequential ID lookup first (for client endpoints - 11, 12, 13...)
+                        category = find_category_by_sequential_id(category_id_int)
+                        if not category:
+                            # Fallback to hash lookup (for admin endpoints - hash IDs)
+                            category = find_category_by_hash(category_id_int)
+                        if not category:
+                            return create_error_response(
+                                error_message=f'Category with ID "{category_id_str}" not found. Expected UUID, sequential ID (11, 12, 13...), or valid integer hash.',
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                errors={'category': [f'Category not found with ID "{category_id_str}".']}
+                            )
                     except (ValueError, TypeError):
                         return create_error_response(
-                            error_message=f'Invalid category ID format: "{category_id_str}". Expected UUID or valid integer hash.',
+                            error_message=f'Invalid category ID format: "{category_id_str}". Expected UUID, sequential ID, or valid integer hash.',
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            errors={'category': [f'Invalid category ID format. Expected UUID.']}
+                            errors={'category': [f'Invalid category ID format. Expected UUID or integer.']}
                         )
             
             # Category is required for Product model
@@ -649,8 +777,19 @@ class ProductsViewSet(viewsets.ModelViewSet):
             # TODO: Handle productTexts, colors, prices, warranty, specifications, etc.
             # These might need to be created as related objects
             
+            # Get category ID mapping for serializer context (use sequential IDs)
+            from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+            all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+            global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+            
             # Return with ProductCompatibilitySerializer (old Swagger format)
-            compat_serializer = ProductCompatibilitySerializer(product, context={'request': request})
+            compat_serializer = ProductCompatibilitySerializer(
+                product, 
+                context={
+                    'request': request,
+                    'category_id_mapping': global_category_id_mapping
+                }
+            )
             response_data = compat_serializer.data
             print(f'DEBUG CREATE PRODUCT - Response data inStock: {response_data.get("inStock")}')
             return create_success_response(data=response_data)  # 200 OK to match old Swagger
@@ -915,7 +1054,19 @@ class ProductsViewSet(viewsets.ModelViewSet):
             )
         
         product = serializer.save()
-        compat_serializer = ProductCompatibilitySerializer(product, context={'request': request})
+        
+        # Get category ID mapping for serializer context (use sequential IDs)
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+        
+        compat_serializer = ProductCompatibilitySerializer(
+            product, 
+            context={
+                'request': request,
+                'category_id_mapping': global_category_id_mapping
+            }
+        )
         return create_success_response(data=compat_serializer.data)
 
     @extend_schema(
@@ -1073,7 +1224,19 @@ class ProductsViewSet(viewsets.ModelViewSet):
             )
         
         product = serializer.save()
-        compat_serializer = ProductCompatibilitySerializer(product, context={'request': request})
+        
+        # Get category ID mapping for serializer context (use sequential IDs)
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
+        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
+        
+        compat_serializer = ProductCompatibilitySerializer(
+            product, 
+            context={
+                'request': request,
+                'category_id_mapping': global_category_id_mapping
+            }
+        )
         return create_success_response(data=compat_serializer.data)
 
     @extend_schema(
@@ -2692,6 +2855,9 @@ class ProductsClientSearchView(APIView):
 
     def post(self, request):
         """Client search for products with orderBy options. Returns format matching old Swagger."""
+        from zistino_apps.products.models import Category
+        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
+        
         serializer = ProductClientSearchRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
@@ -2704,6 +2870,7 @@ class ProductsClientSearchView(APIView):
         min_price = serializer.validated_data.get('minPrice')
         max_price = serializer.validated_data.get('maxPrice')
         order_by = serializer.validated_data.get('orderBy', [])
+        # orderBy can be empty - apply_order_by will handle it with default ordering
 
         qs = Product.objects.filter(is_active=True).select_related('category')
         
@@ -2713,18 +2880,12 @@ class ProductsClientSearchView(APIView):
         if brands:
             # TODO: Filter by brand name when brand relationship is implemented
             pass
-        if category_type is not None:
-            # Filter by category type - get all categories of this type and filter products
-            from zistino_apps.products.models import Category
-            categories_of_type = Category.objects.filter(type=category_type, is_active=True)
-            category_uuids = [cat.id for cat in categories_of_type]
-            if category_uuids:
-                qs = qs.filter(category_id__in=category_uuids)
-            else:
-                # No categories of this type, return empty
-                qs = qs.none()
-        elif category_id:
+        if category_id:
             qs = qs.filter(category_id=category_id)
+        if category_type is not None:
+            # Filter products by category type (1=products, 2=waste)
+            categories_with_type = Category.objects.filter(type=category_type, is_active=True)
+            qs = qs.filter(category__in=categories_with_type)
         if min_price is not None:
             qs = qs.filter(price_per_unit__gte=min_price)
         if max_price is not None:
@@ -2738,9 +2899,7 @@ class ProductsClientSearchView(APIView):
         items = qs[start:end] if page_size > 0 else qs[:20]
         total_count = qs.count()
 
-        # Create category ID mapping for serializer context
-        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
-        from zistino_apps.products.models import Category
+        # Get category ID mapping for serializer context (use sequential IDs)
         all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
         global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
 
@@ -2887,21 +3046,8 @@ class ProductsClientSearchExtView(APIView):
         items = qs[start:end] if page_size > 0 else qs[:20]
         total_count = qs.count()
 
-        # Create category ID mapping for serializer context
-        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
-        from zistino_apps.products.models import Category
-        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
-        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
-
         # Use ProductAdminSearchExtResponseSerializer for output
-        product_serializer = ProductAdminSearchExtResponseSerializer(
-            items, 
-            many=True, 
-            context={
-                'request': request,
-                'category_id_mapping': global_category_id_mapping
-            }
-        )
+        product_serializer = ProductAdminSearchExtResponseSerializer(items, many=True, context={'request': request})
         
         # Calculate totalPages (matching old Swagger behavior: -2147483648 when pageSize is 0)
         if page_size > 0:
@@ -3332,58 +3478,17 @@ class ProductsSoldView(APIView):
 
 @extend_schema(tags=['Products'])
 class ProductsClientByCategoryIdView(APIView):
-    """GET or POST /api/v1/products/client/by-categoryid/{id}"""
+    """POST /api/v1/products/client/by-categoryid/{id}"""
     permission_classes = [AllowAny]
 
-    def get(self, request, id):
-        """GET method - same as POST for compatibility."""
-        return self.post(request, id)
-
     def post(self, request, id):
-        """Get products by category ID. Accepts both UUID and integer ID."""
-        from zistino_apps.products.models import Category
-        from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
-        
+        """Get products by category ID."""
         page_number = int(request.data.get('pageNumber', 1))
         page_size = int(request.data.get('pageSize', 20))
         keyword = (request.data.get('keyword') or '').strip()
         order_by = request.data.get('orderBy', [])
 
-        # Try to parse as UUID first
-        try:
-            category_uuid = uuid.UUID(str(id))
-            # Valid UUID - use directly
-            qs = Product.objects.filter(category_id=category_uuid, is_active=True)
-        except (ValueError, TypeError):
-            # Not a valid UUID - try as integer ID
-            try:
-                category_id_int = int(id)
-                # Get all active categories for mapping
-                all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
-                global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
-                reverse_mapping = {v: k for k, v in global_category_id_mapping.items()}
-                
-                # Get category UUID from integer ID
-                category_uuid_str = reverse_mapping.get(category_id_int)
-                if not category_uuid_str:
-                    # Category not found with this integer ID
-                    return create_success_response(data=[], messages=[], status_code=status.HTTP_200_OK)
-                
-                try:
-                    category_uuid = uuid.UUID(category_uuid_str)
-                    qs = Product.objects.filter(category_id=category_uuid, is_active=True)
-                except (ValueError, TypeError):
-                    return create_error_response(
-                        error_message=f'Invalid category UUID: {category_uuid_str}',
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'id': [f'Invalid category UUID: {category_uuid_str}']}
-                    )
-            except (ValueError, TypeError):
-                return create_error_response(
-                    error_message=f'Invalid category ID: {id}. Expected UUID or integer.',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    errors={'id': [f'Invalid category ID: {id}. Expected UUID or integer.']}
-                )
+        qs = Product.objects.filter(category_id=id, is_active=True)
         if keyword:
             qs = qs.filter(Q(name__icontains=keyword) | Q(description__icontains=keyword))
         
@@ -3393,19 +3498,8 @@ class ProductsClientByCategoryIdView(APIView):
         end = start + page_size
         items = qs[start:end]
 
-        # Create category ID mapping for serializer context
-        all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
-        global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
-
         # Use ProductCompatibilitySerializer for output
-        product_serializer = ProductCompatibilitySerializer(
-            items, 
-            many=True, 
-            context={
-                'request': request,
-                'category_id_mapping': global_category_id_mapping
-            }
-        )
+        product_serializer = ProductCompatibilitySerializer(items, many=True, context={'request': request})
         
         # Return paginated format: data array with pagination fields at root level
         response_data = create_success_response(data=product_serializer.data)
@@ -3429,7 +3523,7 @@ class ProductsClientByCategoryIdView(APIView):
             type=str,
             location=OpenApiParameter.PATH,
             required=True,
-            description='Category type ID'
+            description='Category type (1=product categories, 2=waste categories). If not provided, returns all products.'
         )
     ],
     responses={
@@ -3486,87 +3580,50 @@ class ProductsClientByCategoryIdView(APIView):
     }
 )
 class ProductsClientByCategoryTypeView(APIView):
-    """GET or POST /api/v1/products/client/by-categorytype/{id}"""
+    """GET/POST /api/v1/products/client/by-categorytype/{id} - Get products by category type (1=products, 2=waste)"""
     permission_classes = [AllowAny]
 
-    def get(self, request, id):
-        """GET method - same as POST for compatibility."""
-        return self.post(request, id)
-
-    def post(self, request, id):
-        """Get products by category type OR category ID. Returns format matching old Swagger.
-        
-        The endpoint name suggests it filters by category TYPE, but it can also accept category ID.
-        - If id is 0-32: treat as category type and filter products by categories of that type
-        - Otherwise: treat as category ID (integer ID from categories endpoint) and filter by that category
-        """
+    def _get_products_by_category_type(self, request, id):
+        """Helper method to get products by category type."""
         from zistino_apps.products.models import Category
         from zistino_apps.compatibility.categories.serializers import get_category_integer_id_mapping
         
-        page_number = int(request.data.get('pageNumber', 1))
-        page_size = int(request.data.get('pageSize', 20))
-
-        # Convert to integer
+        # Convert category type to integer
         try:
-            id_int = int(id)
+            category_type = int(id)
         except (ValueError, TypeError):
             return create_error_response(
-                error_message=f'Invalid ID: {id}. Expected integer.',
+                error_message=f'Invalid category type: {id}. Expected integer (1=products, 2=waste).',
                 status_code=status.HTTP_400_BAD_REQUEST,
-                errors={'id': [f'Invalid ID: {id}. Expected integer.']}
+                errors={'id': [f'Invalid category type: {id}. Expected integer.']}
             )
         
-        # Get all active categories for mapping
+        # Filter products by category type
+        # Get all categories with the specified type
+        categories_with_type = Category.objects.filter(type=category_type, is_active=True)
+        
+        # Get all products where category has the specified type
+        # If type is not provided or invalid, return all products
+        if category_type:
+            qs = Product.objects.filter(
+                category__in=categories_with_type,
+                is_active=True
+            ).select_related('category')
+        else:
+            # If type is 0 or not specified, return all products
+            qs = Product.objects.filter(is_active=True).select_related('category')
+        
+        # Apply ordering
+        qs = qs.order_by('-created_at')
+        
+        # Get category ID mapping for serializer context
         all_categories_global = Category.objects.filter(is_active=True).order_by('created_at', 'name')
         global_category_id_mapping = get_category_integer_id_mapping(all_categories_global, base_id=11)
-        
-        # Determine if id is a category type (0-32) or a category ID (>= 11)
-        if 0 <= id_int <= 32:
-            # Treat as category type - filter products by categories of this type
-            # Note: Old Swagger shows products regardless of is_active status
-            # So we only filter by category is_active, not product is_active
-            categories_of_type = Category.objects.filter(type=id_int, is_active=True)
-            category_uuids = [cat.id for cat in categories_of_type]
-            
-            if not category_uuids:
-                # No categories of this type, return empty
-                return create_success_response(data=[], messages=[], status_code=status.HTTP_200_OK)
-            
-            # Filter products by categories of this type
-            # Don't filter by product is_active - old Swagger shows all products (active and inactive)
-            qs = Product.objects.filter(category_id__in=category_uuids)
-        else:
-            # Treat as category ID - find category by integer ID
-            reverse_mapping = {v: k for k, v in global_category_id_mapping.items()}
-            category_uuid_str = reverse_mapping.get(id_int)
-            
-            if not category_uuid_str:
-                # Category not found with this integer ID
-                return create_success_response(data=[], messages=[], status_code=status.HTTP_200_OK)
-            
-            try:
-                category_uuid = uuid.UUID(category_uuid_str)
-            except (ValueError, TypeError):
-                return create_error_response(
-                    error_message=f'Invalid category UUID: {category_uuid_str}',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    errors={'id': [f'Invalid category UUID: {category_uuid_str}']}
-                )
-            
-            # Filter products by category
-            # Don't filter by product is_active - old Swagger shows all products (active and inactive)
-            qs = Product.objects.filter(category_id=category_uuid)
-        
-        start = (page_number - 1) * page_size
-        end = start + page_size
-        items = qs[start:end]
-
-        # Create category ID mapping for serializer context (use global mapping)
         category_id_mapping_for_serializer = global_category_id_mapping
 
-        # Use ProductAdminSearchExtResponseSerializer for output (matching top5 format)
-        product_serializer = ProductAdminSearchExtResponseSerializer(
-            items, 
+        # Use ProductCompatibilitySerializer for output (matching list format)
+        product_serializer = ProductCompatibilitySerializer(
+            qs, 
             many=True, 
             context={
                 'request': request,
@@ -3576,6 +3633,14 @@ class ProductsClientByCategoryTypeView(APIView):
         
         # Return simple format (no pagination fields, matching old Swagger)
         return create_success_response(data=product_serializer.data)
+
+    def get(self, request, id):
+        """GET method - Get products by category type."""
+        return self._get_products_by_category_type(request, id)
+    
+    def post(self, request, id):
+        """POST method - Get products by category type (for backward compatibility)."""
+        return self._get_products_by_category_type(request, id)
 
 
 @extend_schema(

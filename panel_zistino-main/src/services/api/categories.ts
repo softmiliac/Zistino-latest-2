@@ -27,6 +27,8 @@ const categories = {
     id ? get(`/categories/${id}`).then((res) => res.data) : {},
   getByType: (type: number) =>
     get(`/categories/by-type/${type}`).then((res) => res.data),
+  getClientByType: (type: number) =>
+    get(`/categories/client/by-type/${type}`).then((res) => res.data),
   create: (data: ICategory) => post("/categories/", data),
   delete: (id: string) =>
     remove(`/categories/${id}`).then((res) => res.data),
@@ -68,6 +70,10 @@ export const useCategoriesByType = (
 
 export const useCategoryByType = (type: number) => {
   return useQuery(["categories-type", type], () => categories.getByType(type));
+};
+
+export const useCategoryClientByType = (type: number) => {
+  return useQuery(["categories-client-type", type], () => categories.getClientByType(type));
 };
 
 export const useDeleteCategory = () => {

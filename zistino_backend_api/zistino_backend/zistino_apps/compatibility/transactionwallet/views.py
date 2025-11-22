@@ -211,6 +211,17 @@ class TransactionWalletViewSet(viewsets.ModelViewSet):
             # Get or create wallet for user
             wallet, _ = Wallet.objects.get_or_create(user=user)
             
+            # Get sender (admin/manager who created the transaction)
+            sender = None
+            if validated_data.get('senderId'):
+                try:
+                    sender = User.objects.get(id=validated_data['senderId'])
+                except User.DoesNotExist:
+                    pass  # If sender not found, use None
+            # If no senderId provided, use the current user (admin/manager creating the transaction)
+            if not sender and request.user and request.user.is_authenticated:
+                sender = request.user
+            
             # Map type (0=credit, 1=debit) to transaction_type
             transaction_type_map = {0: 'credit', 1: 'debit'}
             transaction_type = transaction_type_map.get(validated_data['type'], 'credit')
@@ -226,6 +237,7 @@ class TransactionWalletViewSet(viewsets.ModelViewSet):
             # Create transaction
             transaction = Transaction.objects.create(
                 wallet=wallet,
+                sender=sender,
                 amount=validated_data['price'],
                 transaction_type=transaction_type,
                 status=transaction_status,

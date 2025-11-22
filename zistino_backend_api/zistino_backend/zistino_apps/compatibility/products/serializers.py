@@ -226,7 +226,7 @@ class ProductCompatibilitySerializer(serializers.ModelSerializer):
         return int(avg_rating) if avg_rating else 0
 
     def get_categories(self, obj):
-        """Get categories as JSON string array format: '[{\"id\":\"6\"}]'."""
+        """Get categories as JSON string array format: '[{\"id\":\"11\"}]'."""
         if obj.category:
             import json
             # Get category ID mapping from context if available
@@ -240,6 +240,7 @@ class ProductCompatibilitySerializer(serializers.ModelSerializer):
                 # Fallback to UUID string if mapping not available
                 category_id = category_uuid_str
             
+            # Old Swagger format: "[{\"id\":\"11\"}]" - ID as string
             category_data = [{"id": str(category_id)}]
             return json.dumps(category_data)
         return None

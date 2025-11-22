@@ -67,8 +67,9 @@ class TransactionWalletSearchRequestSerializer(serializers.Serializer):
 
 class TransactionDetailResponseSerializer(serializers.Serializer):
     """Response serializer for transaction details matching old Swagger format."""
+    id = serializers.UUIDField(read_only=True)
     userId = serializers.CharField(source='wallet.user.id', read_only=True)
-    senderId = serializers.CharField(allow_null=True, required=False, default=None)
+    senderId = serializers.SerializerMethodField()
     type = serializers.SerializerMethodField()
     price = serializers.DecimalField(source='amount', max_digits=10, decimal_places=2, read_only=True)
     coin = serializers.IntegerField(allow_null=True, required=False, default=None)
@@ -78,6 +79,14 @@ class TransactionDetailResponseSerializer(serializers.Serializer):
     status = serializers.SerializerMethodField()
     title = serializers.CharField(source='reference_id', allow_null=True, required=False, read_only=True)
     description = serializers.CharField(allow_null=True, required=False, read_only=True)
+    
+    def get_senderId(self, obj):
+        """Get sender ID if available, otherwise return None."""
+        # Get sender from the transaction
+        if obj.sender:
+            return str(obj.sender.id)
+        # If no sender, return None (frontend will show "کاربر" as fallback)
+        return None
     
     def get_type(self, obj):
         """Map transaction_type to integer (0=credit, 1=debit)."""

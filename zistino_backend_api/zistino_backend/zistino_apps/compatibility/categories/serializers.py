@@ -175,8 +175,9 @@ class CategoryClientSerializer(serializers.ModelSerializer):
         return None
 
     def get_thumbnail(self, obj):
-        """Return thumbnail (null for client endpoints)."""
-        return None
+        """Return thumbnail (same as imagePath for client endpoints to match old Swagger)."""
+        # Old Swagger shows thumbnail same as imagePath
+        return self.get_imagePath(obj)
 
     def get_count(self, obj):
         """Return count of products in category (null by default, populated in by-type-count endpoint)."""
@@ -258,4 +259,3 @@ class CategorySearchRequestSerializer(serializers.Serializer):
     id = serializers.IntegerField(required=False, allow_null=True, help_text='Category ID filter')
     type = serializers.IntegerField(required=False, allow_null=True, help_text='Category type filter')
 
-#new comment
