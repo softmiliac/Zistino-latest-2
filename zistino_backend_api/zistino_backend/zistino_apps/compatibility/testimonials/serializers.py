@@ -13,7 +13,7 @@ class TestimonialCreateRequestSerializer(serializers.Serializer):
     thumbnail = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=500, help_text='Thumbnail URL')
     rate = serializers.IntegerField(required=False, default=0, min_value=0, max_value=5, help_text='Rating from 0 to 5')
     productId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Product ID (UUID)')
-    examId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Exam ID')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID')
     jobId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Job ID')
     blogId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Blog ID')
     locale = serializers.CharField(required=False, allow_blank=True, default='fa', max_length=10, help_text='Locale')
@@ -52,7 +52,7 @@ class TestimonialSearchRequestSerializer(serializers.Serializer):
         help_text='Order by fields'
     )
     productId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Filter by product ID')
-    examId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Filter by exam ID')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Filter by exam ID')
     jobId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Filter by job ID')
     blogId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Filter by blog ID')
     locale = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Filter by locale')
@@ -78,7 +78,7 @@ class TestimonialDetailSerializer(serializers.ModelSerializer):
     
     def get_examId(self, obj):
         """Return None as examId is not in the model."""
-        return None
+        return None  # Returns None which will be serialized as null
     
     def get_jobId(self, obj):
         """Return None as jobId is not in the model."""

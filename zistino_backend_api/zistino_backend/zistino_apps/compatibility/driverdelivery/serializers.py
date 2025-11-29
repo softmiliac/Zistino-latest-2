@@ -18,10 +18,10 @@ class DriverDeliveryCreateRequestSerializer(serializers.Serializer):
     setUserId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Set User ID (UUID string)')
     addressId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Address ID')
     orderId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Order ID')
-    examId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Exam ID')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID')
     requestId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Request ID')
     zoneId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Zone ID')
-    preOrderId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Pre Order ID')
+    preOrderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Pre Order ID')
     status = serializers.IntegerField(required=False, default=0, help_text='Delivery status (0=assigned, 1=in_progress, 2=completed, 3=cancelled)')
     description = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Description')
 

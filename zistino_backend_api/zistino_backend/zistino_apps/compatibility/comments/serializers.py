@@ -36,7 +36,7 @@ class CommentSearchRequestSerializer(serializers.Serializer):
         help_text='Order by fields'
     )
     productId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Product UUID as string')
-    examId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Exam ID (not used, for compatibility only)')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID (not used, for compatibility only)')
     jobId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Job ID (not used, for compatibility only)')
     blogId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Blog ID (not used, for compatibility only)')
     trackId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Track ID (not used, for compatibility only)')
@@ -59,7 +59,7 @@ class CommentCreateRequestSerializer(serializers.Serializer):
     """Request serializer for creating a comment matching old Swagger format."""
     parentId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Parent comment ID (0 for top-level comments)')
     productId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Product UUID as string (e.g., "94860000-b419-c60d-e381-08de1e92a377"). Required for create, optional for update.')
-    examId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Exam ID (not used, for compatibility only)')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID (not used, for compatibility only)')
     jobId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Job ID (not used, for compatibility only)')
     trackId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Track ID (not used, for compatibility only)')
     blogId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Blog ID (not used, for compatibility only)')
@@ -101,7 +101,7 @@ class CommentAnonymousRequestSerializer(serializers.Serializer):
     """Request serializer for creating an anonymous comment matching old Swagger format."""
     parentId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Parent comment ID (0 for top-level comments)')
     productId = serializers.CharField(required=True, help_text='Product UUID as string')
-    examId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Exam ID (not used, for compatibility only)')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID (not used, for compatibility only)')
     jobId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Job ID (not used, for compatibility only)')
     trackId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Track ID (not used, for compatibility only)')
     blogId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Blog ID (not used, for compatibility only)')
@@ -236,7 +236,7 @@ class CommentCompatibilitySerializer(serializers.Serializer):
     
     def get_examId(self, obj):
         """Return null (not used)."""
-        return None
+        return None  # Returns None which will be serialized as null
     
     def get_jobId(self, obj):
         """Return null (not used)."""
@@ -324,8 +324,8 @@ class CommentWithChildrenSerializer(CommentCompatibilitySerializer):
         return ''
     
     def get_examId(self, obj):
-        """Return 0 (not used)."""
-        return 0
+        """Return '0' as string (not used)."""
+        return '0'
     
     def get_blogId(self, obj):
         """Return null (not used)."""

@@ -444,7 +444,7 @@ class IdentityRegisterWithCodeView(APIView):
                     'examId': 0,
                     'requestId': 0,
                     'zoneId': 0,
-                    'preOrderId': 0,
+                    'preOrderId': '0',
                     'status': 0,
                     'description': 'string'
                 }

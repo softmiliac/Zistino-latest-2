@@ -48,6 +48,17 @@ class MapZoneViewSet(viewsets.ModelViewSet):
     serializer_class = ZoneSerializer
     permission_classes = [IsAuthenticated, IsManager]
 
+    def get_permissions(self):
+        """
+        Allow all authenticated users (customers, drivers) to read zones.
+        Only managers can create, update, or delete zones.
+        """
+        if self.action in ['list', 'retrieve', 'search']:
+            # Read operations: allow all authenticated users
+            return [IsAuthenticated()]
+        # Write operations: require manager permission
+        return [IsAuthenticated(), IsManager()]
+
     def get_queryset(self):
         """Return all zones."""
         return Zone.objects.all().order_by('zone')
@@ -633,7 +644,7 @@ class MapZoneSearchUserInZoneView(APIView):
 )
 class MapZoneUserInZoneView(APIView):
     """POST /api/v1/mapzone/userinzone - Get zones for user"""
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         """Get zones for a specific user matching old Swagger format."""
@@ -663,6 +674,20 @@ class MapZoneUserInZoneView(APIView):
                     error_message=f'User with ID "{user_id_str}" not found.',
                     status_code=status.HTTP_404_NOT_FOUND,
                     errors={'userid': [f'User with ID "{user_id_str}" not found.']}
+                )
+            
+            # Security: Non-managers can only see their own zones
+            # Managers can see any user's zones
+            is_manager = request.user.is_authenticated and (
+                hasattr(request.user, 'is_staff') and request.user.is_staff or
+                IsManager().has_permission(request, self)
+            )
+            
+            if not is_manager and str(request.user.id) != str(user.id):
+                return create_error_response(
+                    error_message='You can only view your own zones.',
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    errors={'userid': ['You can only view your own zones.']}
                 )
             
             # Get user zones
