@@ -15,7 +15,8 @@ from django.db.models import Q, Count
 from zistino_apps.users.permissions import IsManager
 
 from zistino_apps.compatibility.utils import create_success_response, create_error_response
-from .models import Localization
+# Import directly from configurations to avoid circular import issues
+from zistino_apps.configurations.models import Localization
 from .serializers import (
     LocalizationSerializer,
     LocalizationCreateSerializer,
