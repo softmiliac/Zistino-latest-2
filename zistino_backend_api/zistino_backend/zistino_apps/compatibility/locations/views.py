@@ -53,9 +53,14 @@ class LocationsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        """Set permissions based on action."""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        """
+        Allow all authenticated users (drivers, customers) to read, create, and update locations.
+        Only managers can delete locations.
+        """
+        if self.action in ['destroy']:
+            # Delete operations: require manager permission
             return [IsAuthenticated(), IsManager()]
+        # Read, create, and update operations: allow all authenticated users
         return [IsAuthenticated()]
 
     @extend_schema(
@@ -113,16 +118,20 @@ class LocationsViewSet(viewsets.ViewSet):
             
             validated_data = serializer.validated_data
             
-            # Get user
+            # Get user (use current user if userId not provided)
             user_id = validated_data.get('userId')
-            try:
-                user = User.objects.get(id=user_id)
-            except User.DoesNotExist:
-                return create_error_response(
-                    error_message=f'User with ID "{user_id}" not found.',
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    errors={'userId': [f'User with ID "{user_id}" not found.']}
-                )
+            if not user_id:
+                # Default to current user if userId not provided
+                user = request.user
+            else:
+                try:
+                    user = User.objects.get(id=user_id)
+                except User.DoesNotExist:
+                    return create_error_response(
+                        error_message=f'User with ID "{user_id}" not found.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'userId': [f'User with ID "{user_id}" not found.']}
+                    )
             
             # Get trip
             trip_id = validated_data.get('tripId')

@@ -113,7 +113,7 @@ class DeliverySerializer(serializers.Serializer):
     deliveryDate = serializers.DateTimeField(required=False, allow_null=True)
     setUserId = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     addressId = serializers.IntegerField(required=False, default=0)
-    orderId = serializers.IntegerField(required=False, default=0)
+    orderId = serializers.CharField(required=False, allow_blank=True, default='0')
     examId = serializers.CharField(required=False, allow_blank=True, default='0')
     requestId = serializers.IntegerField(required=False, default=0)
     zoneId = serializers.IntegerField(required=False, default=0)

@@ -50,9 +50,14 @@ class TripViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_permissions(self):
-        """Set permissions based on action."""
+        """
+        Allow all authenticated users (drivers, customers) to read trips.
+        Only managers can create, update, or delete trips.
+        """
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            # Write operations: require manager permission
             return [IsAuthenticated(), IsManager()]
+        # Read operations: allow all authenticated users
         return [IsAuthenticated()]
 
     @extend_schema(

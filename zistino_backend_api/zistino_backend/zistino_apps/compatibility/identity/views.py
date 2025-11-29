@@ -440,7 +440,7 @@ class IdentityRegisterWithCodeView(APIView):
                     'deliveryDate': '2025-11-11T11:55:23.464Z',
                     'setUserId': 'string',
                     'addressId': 0,
-                    'orderId': 0,
+                    'orderId': '0',
                     'examId': 0,
                     'requestId': 0,
                     'zoneId': 0,

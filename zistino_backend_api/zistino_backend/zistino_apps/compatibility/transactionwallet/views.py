@@ -235,15 +235,20 @@ class TransactionWalletViewSet(viewsets.ModelViewSet):
                 transaction_status = 'completed'
             
             # Create transaction
-            transaction = Transaction.objects.create(
-                wallet=wallet,
-                sender=sender,
-                amount=validated_data['price'],
-                transaction_type=transaction_type,
-                status=transaction_status,
-                description=validated_data.get('description', '') or validated_data.get('title', ''),
-                reference_id=validated_data.get('title', '') or '',
-            )
+            # Check if sender field exists in model (for backward compatibility)
+            create_kwargs = {
+                'wallet': wallet,
+                'amount': validated_data['price'],
+                'transaction_type': transaction_type,
+                'status': transaction_status,
+                'description': validated_data.get('description', '') or validated_data.get('title', ''),
+                'reference_id': validated_data.get('title', '') or '',
+            }
+            # Only add sender if the field exists in the model (after migration)
+            if hasattr(Transaction, 'sender'):
+                create_kwargs['sender'] = sender
+            
+            transaction = Transaction.objects.create(**create_kwargs)
             
             # Override created_at if createdOn is provided
             if validated_data.get('createdOn'):
@@ -350,6 +355,19 @@ class TransactionWalletViewSet(viewsets.ModelViewSet):
                 transaction.description = validated_data['description'] or ''
             if 'title' in validated_data:
                 transaction.reference_id = validated_data['title'] or ''
+            
+            # Update sender if senderId is provided and field exists
+            if 'senderId' in validated_data and hasattr(Transaction, 'sender'):
+                sender = None
+                if validated_data.get('senderId'):
+                    try:
+                        sender = User.objects.get(id=validated_data['senderId'])
+                    except User.DoesNotExist:
+                        pass  # If sender not found, keep current value
+                # If no senderId provided, use the current user
+                if not sender and request.user and request.user.is_authenticated:
+                    sender = request.user
+                transaction.sender = sender
             
             # Update created_at if provided
             if validated_data.get('createdOn'):

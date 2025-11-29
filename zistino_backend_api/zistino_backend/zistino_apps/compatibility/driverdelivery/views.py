@@ -132,7 +132,7 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     "deliveryDate": "2025-11-10T19:27:57.824Z",
                     "setUserId": "string",
                     "addressId": 0,
-                    "orderId": 0,
+                    "orderId": "0",
                     "examId": 0,
                     "requestId": 0,
                     "zoneId": 0,
@@ -192,8 +192,8 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                 )
             
             # Get order (orderId is required for Delivery model)
-            order_id = validated_data.get('orderId', 0)
-            if order_id == 0:
+            order_id = validated_data.get('orderId', '0')
+            if not order_id or order_id == '0' or order_id == '':
                 # Try to get the first available order or create a placeholder
                 order = Order.objects.first()
                 if not order:
@@ -204,7 +204,16 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     )
             else:
                 try:
-                    order = Order.objects.get(id=order_id)
+                    # orderId is now a UUID string
+                    import uuid
+                    order_uuid = uuid.UUID(str(order_id))
+                    order = Order.objects.get(id=order_uuid)
+                except (ValueError, TypeError):
+                    return create_error_response(
+                        error_message=f'Invalid order ID format: "{order_id}". Expected UUID.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'orderId': [f'Invalid order ID format: "{order_id}". Expected UUID.']}
+                    )
                 except Order.DoesNotExist:
                     return create_error_response(
                         error_message=f'Order with ID "{order_id}" not found.',
@@ -254,7 +263,7 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     "deliveryDate": "2025-11-10T19:31:29.981Z",
                     "setUserId": None,
                     "addressId": 1,
-                    "orderId": 1,
+                    "orderId": "string",
                     "examId": None,
                     "requestId": None,
                     "zoneId": None,
@@ -328,15 +337,25 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     )
             
             # Update order if provided
-            if validated_data.get('orderId'):
+            order_id = validated_data.get('orderId')
+            if order_id and order_id != '0' and order_id != '':
                 try:
-                    order = Order.objects.get(id=validated_data['orderId'])
+                    # orderId is now a UUID string
+                    import uuid
+                    order_uuid = uuid.UUID(str(order_id))
+                    order = Order.objects.get(id=order_uuid)
                     delivery.order = order
+                except (ValueError, TypeError):
+                    return create_error_response(
+                        error_message=f'Invalid order ID format: "{order_id}". Expected UUID.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'orderId': [f'Invalid order ID format: "{order_id}". Expected UUID.']}
+                    )
                 except Order.DoesNotExist:
                     return create_error_response(
-                        error_message=f'Order with ID "{validated_data["orderId"]}" not found.',
+                        error_message=f'Order with ID "{order_id}" not found.',
                         status_code=status.HTTP_404_NOT_FOUND,
-                        errors={'orderId': [f'Order with ID "{validated_data["orderId"]}" not found.']}
+                        errors={'orderId': [f'Order with ID "{order_id}" not found.']}
                     )
             
             # Update status if provided
