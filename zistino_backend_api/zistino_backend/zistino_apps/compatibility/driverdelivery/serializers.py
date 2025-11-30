@@ -22,7 +22,7 @@ class DriverDeliveryCreateRequestSerializer(serializers.Serializer):
     requestId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Request ID')
     zoneId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Zone ID')
     preOrderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Pre Order ID')
-    status = serializers.IntegerField(required=False, default=0, help_text='Delivery status (0=assigned, 1=in_progress, 2=completed, 3=cancelled)')
+    status = serializers.IntegerField(required=False, default=0, help_text='Delivery status (0-30: 0=assigned, 1=in_progress, 2=completed, 3=cancelled, 4-30=in_progress)')
     description = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Description')
 
 
@@ -42,7 +42,7 @@ class DriverDeliveryUpdateRequestSerializer(serializers.Serializer):
     requestId = serializers.IntegerField(required=False, allow_null=True, help_text='Request ID')
     zoneId = serializers.IntegerField(required=False, allow_null=True, help_text='Zone ID')
     preOrderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Pre Order ID')
-    status = serializers.IntegerField(required=False, allow_null=True, help_text='Delivery status (0=assigned, 1=in_progress, 2=completed, 3=cancelled)')
+    status = serializers.IntegerField(required=False, allow_null=True, help_text='Delivery status (0-30: 0=assigned, 1=in_progress, 2=completed, 3=cancelled, 4-30=in_progress)')
     description = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Description')
     deliveredWeight = serializers.DecimalField(required=False, allow_null=True, max_digits=10, decimal_places=2, help_text='Delivered weight in kg')
     reminderSmsSent = serializers.BooleanField(required=False, allow_null=True, help_text='Whether reminder SMS has been sent')
