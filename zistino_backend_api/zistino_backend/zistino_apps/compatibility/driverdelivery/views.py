@@ -104,8 +104,9 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
         """Retrieve a delivery by ID matching old Swagger format."""
         try:
             delivery = self.get_object()
-            serializer = DeliverySerializer(delivery)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            # Use DriverDeliveryMyRequestsResponseSerializer to match old Swagger format
+            serializer = DriverDeliveryMyRequestsResponseSerializer(delivery)
+            return create_success_response(data=serializer.data, messages=[])
         except Delivery.DoesNotExist:
             pk = kwargs.get('id', 'unknown')
             return create_error_response(
@@ -206,16 +207,39 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     )
             else:
                 try:
-                    # orderId is now a UUID string
+                    # Try UUID first
                     import uuid
                     order_uuid = uuid.UUID(str(order_id))
                     order = Order.objects.get(id=order_uuid)
                 except (ValueError, TypeError):
-                    return create_error_response(
-                        error_message=f'Invalid order ID format: "{order_id}". Expected UUID.',
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'orderId': [f'Invalid order ID format: "{order_id}". Expected UUID.']}
-                    )
+                    # If not a valid UUID, try as integer hash (old Swagger format)
+                    try:
+                        integer_id = int(order_id)
+                        # Find order whose UUID hash matches the integer ID
+                        import hashlib
+                        orders = Order.objects.all()
+                        order = None
+                        for ord in orders:
+                            # Use same hash calculation as OrderCompatibilitySerializer.get_id()
+                            uuid_str = str(ord.id)
+                            hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                            hash_int = int(hash_obj.hexdigest(), 16)
+                            order_id_hash = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
+                            if order_id_hash == integer_id:
+                                order = ord
+                                break
+                        if not order:
+                            return create_error_response(
+                                error_message=f'Order with ID "{order_id}" not found.',
+                                status_code=status.HTTP_404_NOT_FOUND,
+                                errors={'orderId': [f'Order with ID "{order_id}" not found.']}
+                            )
+                    except (ValueError, TypeError):
+                        return create_error_response(
+                            error_message=f'Invalid order ID format: "{order_id}". Expected UUID or integer.',
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            errors={'orderId': [f'Invalid order ID format: "{order_id}". Expected UUID or integer.']}
+                        )
                 except Order.DoesNotExist:
                     return create_error_response(
                         error_message=f'Order with ID "{order_id}" not found.',
@@ -384,17 +408,41 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             order_id = validated_data.get('orderId')
             if order_id and order_id != '0' and order_id != '':
                 try:
-                    # orderId is now a UUID string
+                    # Try UUID first
                     import uuid
                     order_uuid = uuid.UUID(str(order_id))
                     order = Order.objects.get(id=order_uuid)
                     delivery.order = order
                 except (ValueError, TypeError):
-                    return create_error_response(
-                        error_message=f'Invalid order ID format: "{order_id}". Expected UUID.',
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'orderId': [f'Invalid order ID format: "{order_id}". Expected UUID.']}
-                    )
+                    # If not a valid UUID, try as integer hash (old Swagger format)
+                    try:
+                        integer_id = int(order_id)
+                        # Find order whose UUID hash matches the integer ID
+                        import hashlib
+                        orders = Order.objects.all()
+                        order = None
+                        for ord in orders:
+                            # Use same hash calculation as OrderCompatibilitySerializer.get_id()
+                            uuid_str = str(ord.id)
+                            hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                            hash_int = int(hash_obj.hexdigest(), 16)
+                            order_id_hash = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
+                            if order_id_hash == integer_id:
+                                order = ord
+                                break
+                        if not order:
+                            return create_error_response(
+                                error_message=f'Order with ID "{order_id}" not found.',
+                                status_code=status.HTTP_404_NOT_FOUND,
+                                errors={'orderId': [f'Order with ID "{order_id}" not found.']}
+                            )
+                        delivery.order = order
+                    except (ValueError, TypeError):
+                        return create_error_response(
+                            error_message=f'Invalid order ID format: "{order_id}". Expected UUID or integer.',
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            errors={'orderId': [f'Invalid order ID format: "{order_id}". Expected UUID or integer.']}
+                        )
                 except Order.DoesNotExist:
                     return create_error_response(
                         error_message=f'Order with ID "{order_id}" not found.',
@@ -829,8 +877,11 @@ class DriverDeliveryMyRequestsView(APIView):
                     # This is a simplified approach - you might need to store preOrderId mapping
                     matching_orders = []
                     for order in Order.objects.all():
-                        order_id_str = str(order.id).replace('-', '')
-                        order_id_int = int(hashlib.md5(order_id_str.encode()).hexdigest()[:8], 16) % 100000000
+                        # Use same hash calculation as OrderCompatibilitySerializer.get_id()
+                        uuid_str = str(order.id)
+                        hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                        hash_int = int(hash_obj.hexdigest(), 16)
+                        order_id_int = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
                         if str(order_id_int) == str(pre_order_id) or order_id_int == pre_order_id:
                             matching_orders.append(order.id)
                     
