@@ -26,6 +26,7 @@ class Delivery(models.Model):
     driver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deliveries')
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='deliveries')
     status = models.CharField(max_length=20, choices=DELIVERY_STATUS_CHOICES, default='assigned')
+    status_number = models.IntegerField(default=0, blank=True, null=True, help_text='Original status number from Flutter app (0-30)')
     latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     address = models.TextField()
