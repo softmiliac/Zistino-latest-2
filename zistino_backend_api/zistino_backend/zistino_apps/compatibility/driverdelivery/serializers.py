@@ -58,3 +58,131 @@ class DriverDeliverySearchRequestSerializer(serializers.Serializer):
     fromDate = serializers.DateTimeField(required=False, allow_null=True, help_text='Start date filter')
     toDate = serializers.DateTimeField(required=False, allow_null=True, help_text='End date filter')
 
+
+class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
+    """Response serializer for myrequests endpoint matching old Swagger format."""
+    id = serializers.SerializerMethodField()
+    userId = serializers.SerializerMethodField()
+    creator = serializers.SerializerMethodField()
+    deliveryUserId = serializers.SerializerMethodField()
+    deliveryDate = serializers.DateTimeField(source='delivery_date', allow_null=True)
+    dirver = serializers.SerializerMethodField()
+    setUserId = serializers.SerializerMethodField()
+    setUser = serializers.SerializerMethodField()
+    addressId = serializers.SerializerMethodField()
+    address = serializers.CharField()
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    phoneNumber = serializers.CharField(source='phone_number')
+    vatNumber = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+    createdOn = serializers.DateTimeField(source='created_at')
+    requestId = serializers.SerializerMethodField()
+    zoneId = serializers.SerializerMethodField()
+    orderId = serializers.SerializerMethodField()
+    preOrderId = serializers.SerializerMethodField()
+    dirverphone = serializers.SerializerMethodField()
+    description = serializers.CharField(allow_blank=True)
+    
+    def get_id(self, obj):
+        """Return delivery ID as integer hash for compatibility."""
+        import hashlib
+        delivery_id_str = str(obj.id).replace('-', '')
+        delivery_id_int = int(hashlib.md5(delivery_id_str.encode()).hexdigest()[:8], 16) % 100000000
+        return delivery_id_int
+    
+    def get_userId(self, obj):
+        """Return order user ID as string."""
+        if obj.order and obj.order.user:
+            return str(obj.order.user.id)
+        return None
+    
+    def get_creator(self, obj):
+        """Return creator name (order user full name)."""
+        if obj.order and obj.order.user:
+            user = obj.order.user
+            full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            return full_name or user.phone_number or ""
+        return ""
+    
+    def get_deliveryUserId(self, obj):
+        """Return driver ID as string."""
+        if obj.driver:
+            return str(obj.driver.id)
+        return None
+    
+    def get_dirver(self, obj):
+        """Return driver full name."""
+        if obj.driver:
+            full_name = f"{obj.driver.first_name or ''} {obj.driver.last_name or ''}".strip()
+            return full_name or obj.driver.phone_number or ""
+        return ""
+    
+    def get_setUserId(self, obj):
+        """Return set user ID (if exists)."""
+        # This field might not be used, return None for now
+        return None
+    
+    def get_setUser(self, obj):
+        """Return set user name (if exists)."""
+        # This field might not be used, return empty string for now
+        return ""
+    
+    def get_addressId(self, obj):
+        """Return address ID (if exists in order)."""
+        # Try to get address ID from order if it has one
+        # For now, return 0 as default
+        return 0
+    
+    def get_vatNumber(self, obj):
+        """Return VAT number (if exists in order/user)."""
+        # This field might not be used, return empty string for now
+        return ""
+    
+    def get_status(self, obj):
+        """Return status as integer (0=assigned, 1=in_progress, 2=completed, 3=cancelled)."""
+        status_map = {'assigned': 0, 'in_progress': 1, 'completed': 2, 'cancelled': 3}
+        return status_map.get(obj.status, 0)
+    
+    def get_requestId(self, obj):
+        """Return request ID (if exists)."""
+        # This field might not be used, return 0 for now
+        return 0
+    
+    def get_zoneId(self, obj):
+        """Return zone ID based on delivery location."""
+        if obj.latitude and obj.longitude:
+            try:
+                from zistino_apps.deliveries.utils import find_zone_for_location
+                zone = find_zone_for_location(float(obj.latitude), float(obj.longitude))
+                if zone:
+                    return zone.id
+            except Exception:
+                pass
+        return 0
+    
+    def get_orderId(self, obj):
+        """Return order ID as integer hash for compatibility."""
+        if obj.order:
+            import hashlib
+            order_id_str = str(obj.order.id).replace('-', '')
+            order_id_int = int(hashlib.md5(order_id_str.encode()).hexdigest()[:8], 16) % 100000000
+            return order_id_int
+        return 0
+    
+    def get_preOrderId(self, obj):
+        """Return preOrderId (same as orderId for now)."""
+        # preOrderId should be the same as orderId in most cases
+        if obj.order:
+            import hashlib
+            order_id_str = str(obj.order.id).replace('-', '')
+            order_id_int = int(hashlib.md5(order_id_str.encode()).hexdigest()[:8], 16) % 100000000
+            return order_id_int
+        return 0
+    
+    def get_dirverphone(self, obj):
+        """Return driver phone number."""
+        if obj.driver:
+            return obj.driver.phone_number or ""
+        return ""
+
