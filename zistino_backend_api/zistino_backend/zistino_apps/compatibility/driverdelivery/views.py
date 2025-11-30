@@ -13,6 +13,7 @@ from django.contrib.auth import get_user_model
 
 from zistino_apps.deliveries.models import Delivery
 from zistino_apps.orders.models import Order
+from zistino_apps.users.models import Address
 from zistino_apps.deliveries.serializers import DeliverySerializer, DeliverySearchRequestSerializer
 from zistino_apps.users.permissions import IsManager
 from zistino_apps.compatibility.utils import create_success_response, create_error_response
@@ -225,6 +226,48 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             status_map = {0: 'assigned', 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
             delivery_status = status_map.get(validated_data.get('status', 0), 'assigned')
             
+            # Get address from addressId if provided, otherwise use order address
+            address_text = ''
+            phone_number = ''
+            
+            address_id = validated_data.get('addressId', 0)
+            if address_id and address_id != 0:
+                try:
+                    # Get address from Address model
+                    address_obj = Address.objects.get(id=address_id)
+                    address_text = address_obj.address or ''
+                    phone_number = address_obj.phone_number or ''
+                except Address.DoesNotExist:
+                    return create_error_response(
+                        error_message=f'Address with ID "{address_id}" not found.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'addressId': [f'Address with ID "{address_id}" not found.']}
+                    )
+            
+            # Fallback to order address if addressId not provided or address is empty
+            if not address_text and order:
+                address_text = order.address1 or ''
+            if not phone_number and order:
+                phone_number = order.phone1 or ''
+            
+            # Ensure address is not empty (required field)
+            if not address_text:
+                return create_error_response(
+                    error_message='Address is required. Please provide addressId or ensure order has an address.',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    errors={'address': ['Address is required.']}
+                )
+            
+            # Ensure phone_number is not empty (required field)
+            if not phone_number:
+                phone_number = driver.phone_number if hasattr(driver, 'phone_number') and driver.phone_number else ''
+                if not phone_number:
+                    return create_error_response(
+                        error_message='Phone number is required.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'phone_number': ['Phone number is required.']}
+                    )
+            
             # Create delivery
             delivery = Delivery.objects.create(
                 driver=driver,
@@ -232,8 +275,8 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                 status=delivery_status,
                 delivery_date=validated_data.get('deliveryDate'),
                 description=validated_data.get('description', ''),
-                address=order.address1 if order else '',
-                phone_number=order.phone1 if order else ''
+                address=address_text,
+                phone_number=phone_number
             )
             
             # Return delivery ID (using integer hash for compatibility)
