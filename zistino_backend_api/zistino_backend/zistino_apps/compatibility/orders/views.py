@@ -66,7 +66,8 @@ class OrdersViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         """Admin can access all, regular users only their own."""
-        if self.action in ['create', 'list', 'retrieve']:
+        # Allow client_searchsp and client_customer_searchsp for all authenticated users
+        if self.action in ['create', 'list', 'retrieve', 'client_searchsp', 'client_customer_searchsp', 'client_search']:
             return [IsAuthenticated()]
         return [IsAuthenticated(), IsManager()]
 
@@ -102,9 +103,11 @@ class OrdersViewSet(viewsets.ModelViewSet):
                 orders = Order.objects.select_related('user').prefetch_related('order_items').all()
                 order = None
                 for ord in orders:
-                    # Calculate hash the same way as serializer
+                    # Calculate hash the same way as OrderCompatibilitySerializer.get_id()
                     uuid_str = str(ord.id)
-                    order_id_hash = int(hashlib.md5(uuid_str.encode()).hexdigest()[:8], 16) % (10 ** 9)
+                    hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                    hash_int = int(hash_obj.hexdigest(), 16)
+                    order_id_hash = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
                     if order_id_hash == integer_id:
                         order = ord
                         break
