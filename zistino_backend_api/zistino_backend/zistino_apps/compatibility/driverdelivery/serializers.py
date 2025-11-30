@@ -162,23 +162,21 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
         return 0
     
     def get_orderId(self, obj):
-        """Return order ID as integer hash for compatibility."""
+        """Return order ID as integer hash for compatibility (matching OrderCompatibilitySerializer)."""
         if obj.order:
             import hashlib
-            order_id_str = str(obj.order.id).replace('-', '')
-            order_id_int = int(hashlib.md5(order_id_str.encode()).hexdigest()[:8], 16) % 100000000
-            return order_id_int
+            # Use same hash calculation as OrderCompatibilitySerializer.get_id()
+            uuid_str = str(obj.order.id)
+            hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+            hash_int = int(hash_obj.hexdigest(), 16)
+            return hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
         return 0
     
     def get_preOrderId(self, obj):
         """Return preOrderId (same as orderId for now)."""
         # preOrderId should be the same as orderId in most cases
-        if obj.order:
-            import hashlib
-            order_id_str = str(obj.order.id).replace('-', '')
-            order_id_int = int(hashlib.md5(order_id_str.encode()).hexdigest()[:8], 16) % 100000000
-            return order_id_int
-        return 0
+        # Use same calculation as get_orderId to ensure consistency
+        return self.get_orderId(obj)
     
     def get_dirverphone(self, obj):
         """Return driver phone number."""
