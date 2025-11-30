@@ -61,6 +61,7 @@ for url_pattern in router_urls:
         urlpatterns.append(url_pattern)
 
 # Add special endpoints with path parameters (Must come before router to avoid conflicts)
+# IMPORTANT: These must be prepended to urlpatterns, not replace it
 urlpatterns = [
     # ADMIN SEARCH ENDPOINTS (Must come before router to avoid conflicts)
     path('search', views.OrdersViewSet.as_view({'post': 'search'}), name='orders-search'),
@@ -73,6 +74,16 @@ urlpatterns = [
     path('client/searchsp', views.OrdersViewSet.as_view({'post': 'client_searchsp'}), name='orders-client-searchsp'),
     path('client/customer/searchsp', views.OrdersViewSet.as_view({'post': 'client_customer_searchsp'}), name='orders-client-customer-searchsp'),
     
+    # ACTION ENDPOINTS (Must come before <str:id> route to avoid conflicts)
+    path('all', views.OrdersViewSet.as_view({'get': 'all'}), name='orders-all'),
+    path('stats', views.OrdersViewSet.as_view({'get': 'stats'}), name='orders-stats'),
+    path('test-send-sms', views.OrdersViewSet.as_view({'get': 'test_send_sms'}), name='orders-test-send-sms'),
+    path('ordermapping', views.OrdersViewSet.as_view({'post': 'ordermapping'}), name='orders-ordermapping'),
+    path('by-date', views.OrdersViewSet.as_view({'post': 'by_date'}), name='orders-by-date'),
+    path('checkinstock', views.OrdersViewSet.as_view({'post': 'checkinstock'}), name='orders-checkinstock'),
+    path('handyorder', views.OrdersViewSet.as_view({'post': 'handyorder'}), name='orders-handyorder'),
+    path('admin/getbyuserid', views.OrdersViewSet.as_view({'post': 'admin_getbyuserid'}), name='orders-admin-getbyuserid'),
+    
     # SPECIAL ENDPOINTS WITH PATH PARAMETERS (Must come before router to avoid conflicts)
     path('orderzone/<str:lat>/<str:latlong>', views.OrdersOrderZoneView.as_view(), name='orders-orderzone'),
     path('stats-by-resseller/<str:id>', views.OrdersStatsByResellerView.as_view(), name='orders-stats-by-reseller'),
@@ -82,5 +93,5 @@ urlpatterns = [
     path('client/<str:id>', views.OrdersClientRetrieveView.as_view(), name='orders-client-retrieve'),
     path('order-status/<str:id>', views.OrdersOrderStatusUpdateView.as_view(), name='orders-order-status'),
     path('order-item-status/<str:id>', views.OrdersOrderItemStatusUpdateView.as_view(), name='orders-order-item-status'),
-] + urlpatterns
+] + urlpatterns  # Prepend special endpoints to router URLs (list/create routes are in urlpatterns from router)
 
