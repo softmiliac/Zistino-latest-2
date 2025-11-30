@@ -27,14 +27,100 @@ from .serializers import (
 User = get_user_model()
 
 
+def _status_number_column_exists():
+    """Check if status_number column exists in deliveries table. Cache the result."""
+    # Use a simple cache to avoid checking on every request
+    if not hasattr(_status_number_column_exists, '_cached_result'):
+        try:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                # Use proper table name (might be schema.table)
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='deliveries' AND column_name='status_number'
+                """)
+                _status_number_column_exists._cached_result = cursor.fetchone() is not None
+        except Exception as e:
+            # If check fails, assume column doesn't exist
+            # Also clear cache on error to retry next time
+            _status_number_column_exists._cached_result = False
+    return _status_number_column_exists._cached_result
+
+
+# List of all Delivery model fields (excluding status_number)
+# These are the fields that exist in the database before migration
+_DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER = [
+    'id',
+    'driver_id',  # ForeignKey field name in DB
+    'order_id',   # ForeignKey field name in DB
+    'status',
+    'latitude',
+    'longitude',
+    'address',
+    'phone_number',
+    'delivery_date',
+    'delivered_weight',
+    'reminder_sms_sent',
+    'description',
+    'license_plate_number',
+    'customer_confirmation_status',
+    'denial_reason',
+    'cancel_reason',
+    'confirmed_at',
+    'created_at',
+    'updated_at',
+]
+
+
+def _apply_status_number_safe_query(qs):
+    """
+    Apply only() to queryset if status_number column doesn't exist.
+    This prevents Django from trying to SELECT a non-existent column.
+    """
+    column_exists = _status_number_column_exists()
+    if not column_exists:
+        # Column doesn't exist - use only() to explicitly select fields (excluding status_number)
+        return qs.only(*_DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER)
+    return qs
+
+
+def _get_delivery_queryset(user, use_defer=False):
+    """
+    Get delivery queryset with proper handling of status_number column.
+    Uses only() to explicitly select fields, excluding status_number if column doesn't exist.
+    """
+    if user.is_driver:
+        base_qs = Delivery.objects.filter(driver=user)
+    elif user.is_staff:
+        base_qs = Delivery.objects.all()
+    else:
+        base_qs = Delivery.objects.none()
+    
+    # Check if status_number column exists
+    column_exists = _status_number_column_exists()
+    
+    if column_exists:
+        # Column exists - use defer to exclude it (optimization) or include it normally
+        if use_defer:
+            return base_qs.defer('status_number')
+        else:
+            # Include all fields including status_number
+            return base_qs
+    else:
+        # Column doesn't exist - use only() to explicitly select fields (excluding status_number)
+        return _apply_status_number_safe_query(base_qs)
+
+
 @extend_schema(tags=['DriverDelivery'])
 class DriverDeliveryViewSet(viewsets.ModelViewSet):
     """
     ViewSet for DriverDelivery endpoints.
     Wraps the existing DeliveryViewSet functionality for driver-specific operations.
     """
-    # Use defer to exclude status_number if column doesn't exist (backward compatibility)
-    queryset = Delivery.objects.all()
+    # Queryset will be set dynamically in get_queryset() to handle status_number column
+    # We can't use defer() here because if column doesn't exist, it will fail
+    queryset = Delivery.objects.none()  # Placeholder, will be overridden in get_queryset()
     serializer_class = DeliverySerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'id'
@@ -42,24 +128,9 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Filter deliveries to only show those for the current driver."""
-        # Use defer('status_number') to exclude it if column doesn't exist in database
-        try:
-            if self.request.user.is_driver:
-                return Delivery.objects.filter(driver=self.request.user)
-            # Managers can see all deliveries
-            elif self.request.user.is_staff:
-                return Delivery.objects.all()
-            return Delivery.objects.none()
-        except Exception as e:
-            # If error is due to missing status_number column, retry with defer
-            error_str = str(e).lower()
-            if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
-                if self.request.user.is_driver:
-                    return Delivery.objects.defer('status_number').filter(driver=self.request.user)
-                elif self.request.user.is_staff:
-                    return Delivery.objects.defer('status_number').all()
-                return Delivery.objects.defer('status_number').none()
-            raise
+        # Don't use defer by default - only use it if column exists and we want to optimize
+        # For now, default to False to avoid errors
+        return _get_delivery_queryset(self.request.user, use_defer=False)
     
     def get_object(self):
         """Override to handle both UUID and integer IDs for deliveries."""
@@ -70,36 +141,20 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             return None
         
         # Try to get delivery by UUID first
-        # Always use defer('status_number') to exclude it if column doesn't exist in database
         try:
             # Try parsing as UUID
             import uuid
             uuid.UUID(str(pk))
-            # Always defer status_number to avoid column errors before migration
-            try:
-                return Delivery.objects.defer('status_number').get(id=pk)
-            except Exception as e:
-                # If defer fails due to column error, the column doesn't exist yet
-                # In this case, defer() itself might fail, so we'll catch it in the outer try/except
-                error_str = str(e).lower()
-                if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
-                    # Try without defer - this will fail and be caught by outer exception handler
-                    pass
-                raise
+            # Use safe query to avoid errors if column doesn't exist
+            qs = Delivery.objects.filter(id=pk)
+            qs = _apply_status_number_safe_query(qs)
+            return qs.get()
         except (Delivery.DoesNotExist, ValueError, TypeError):
             # If UUID parsing fails, try to find by integer hash
             # This is for backward compatibility with integer IDs
             import hashlib
-            # Always defer status_number to avoid column errors
-            try:
-                deliveries = Delivery.objects.defer('status_number').all()
-            except Exception as e:
-                # If defer fails, try without defer
-                error_str = str(e).lower()
-                if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
-                    deliveries = Delivery.objects.all()
-                else:
-                    raise
+            # Get all deliveries - use safe query
+            deliveries = _apply_status_number_safe_query(Delivery.objects.all())
             
             for delivery in deliveries:
                 delivery_id_str = str(delivery.id).replace('-', '')
@@ -123,6 +178,20 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             serializer = DeliverySerializer(queryset, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
+            # If error is due to missing status_number column, retry without defer
+            error_str = str(e).lower()
+            if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
+                try:
+                    # Retry with regular queryset (without defer) - force no defer
+                    queryset = _get_delivery_queryset(self.request.user, use_defer=False)
+                    serializer = DeliverySerializer(queryset, many=True)
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+                except Exception as retry_error:
+                    return create_error_response(
+                        error_message=f'An error occurred: {str(retry_error)}',
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        errors={'error': [str(retry_error)]}
+                    )
             return create_error_response(
                 error_message=f'An error occurred: {str(e)}',
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -154,17 +223,19 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             error_str = str(e).lower()
             if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
                 try:
-                    # Retry get_object with defer to exclude status_number
+                    # Retry get_object using safe query
                     lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
                     pk = self.kwargs.get(lookup_url_kwarg)
                     try:
                         import uuid
                         uuid_obj = uuid.UUID(str(pk))
-                        delivery = Delivery.objects.defer('status_number').get(id=uuid_obj)
+                        qs = Delivery.objects.filter(id=uuid_obj)
+                        qs = _apply_status_number_safe_query(qs)
+                        delivery = qs.get()
                     except (ValueError, TypeError):
                         # Try integer hash lookup
                         import hashlib
-                        deliveries = Delivery.objects.defer('status_number').all()
+                        deliveries = _apply_status_number_safe_query(Delivery.objects.all())
                         delivery = None
                         for d in deliveries:
                             delivery_id_str = str(d.id).replace('-', '')
@@ -856,23 +927,13 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             if page_size == 0:
                 page_size = 20
             
-            # Build query
-            # Use defer to exclude status_number if column doesn't exist (backward compatibility)
-            try:
-                if request.user.is_staff:
-                    qs = Delivery.objects.all().select_related('driver', 'order', 'order__user')
-                else:
-                    qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
-            except Exception as e:
-                # If error is due to missing status_number column, retry with defer
-                error_str = str(e).lower()
-                if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
-                    if request.user.is_staff:
-                        qs = Delivery.objects.defer('status_number').all().select_related('driver', 'order', 'order__user')
-                    else:
-                        qs = Delivery.objects.defer('status_number').filter(driver=request.user).select_related('driver', 'order', 'order__user')
-                else:
-                    raise
+            # Build query - use safe query to avoid errors if column doesn't exist
+            if request.user.is_staff:
+                qs = Delivery.objects.all().select_related('driver', 'order', 'order__user')
+            else:
+                qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
+            # Apply safe query to exclude status_number if column doesn't exist
+            qs = _apply_status_number_safe_query(qs)
             
             # Filter by userid
             if validated_data.get('userid'):
@@ -1071,17 +1132,10 @@ class DriverDeliveryMyRequestsView(APIView):
             if page_size == 0:
                 page_size = 20
             
-            # Get deliveries for current driver
-            # Use defer to exclude status_number if column doesn't exist (backward compatibility)
-            try:
-                qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
-            except Exception as e:
-                # If error is due to missing status_number column, retry with defer
-                error_str = str(e).lower()
-                if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
-                    qs = Delivery.objects.defer('status_number').filter(driver=request.user).select_related('driver', 'order', 'order__user')
-                else:
-                    raise
+            # Get deliveries for current driver - use safe query to avoid errors
+            qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
+            # Apply safe query to exclude status_number if column doesn't exist
+            qs = _apply_status_number_safe_query(qs)
             
             # Filter by preOrderId if provided (in advancedSearch or as direct field)
             pre_order_id = None
