@@ -358,9 +358,12 @@ class OrderAllSerializer(serializers.Serializer):
     
     def to_representation(self, instance):
         """Convert to representation matching old Swagger format."""
-        # Convert UUID to integer ID
+        # Convert UUID to integer ID (matching OrderCompatibilitySerializer.get_id())
         import hashlib
-        order_id_hash = int(hashlib.md5(str(instance.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
+        uuid_str = str(instance.id)
+        hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+        hash_int = int(hash_obj.hexdigest(), 16)
+        order_id_hash = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
         
         # Format createOrderDate - use create_order_date or created_at
         create_order_date = getattr(instance, 'create_order_date', None) or getattr(instance, 'created_at', None)
