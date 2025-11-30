@@ -247,9 +247,21 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                         errors={'orderId': [f'Order with ID "{order_id}" not found.']}
                     )
             
-            # Map status (0=assigned, 1=in_progress, 2=completed, 3=cancelled) to status
-            status_map = {0: 'assigned', 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
-            delivery_status = status_map.get(validated_data.get('status', 0), 'assigned')
+            # Map status (0-30) to Delivery model statuses
+            # 0 = assigned, 1 = in_progress, 2 = completed, 3 = cancelled
+            # 4-30 = map to in_progress (intermediate/custom statuses)
+            status_value = validated_data.get('status', 0)
+            if status_value == 0:
+                delivery_status = 'assigned'
+            elif status_value == 1:
+                delivery_status = 'in_progress'
+            elif status_value == 2:
+                delivery_status = 'completed'
+            elif status_value == 3:
+                delivery_status = 'cancelled'
+            else:
+                # Status values 4-30 map to in_progress (intermediate/custom statuses)
+                delivery_status = 'in_progress'
             
             # Get address from addressId if provided, otherwise use order address
             address_text = ''
@@ -451,17 +463,32 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     )
             
             # Update status if provided (allows changing from any status to any other status)
+            # Support status values 0-30 (mapped to Delivery model statuses)
             if validated_data.get('status') is not None:
-                status_map = {0: 'assigned', 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
                 status_value = validated_data['status']
-                if status_value in status_map:
-                    delivery.status = status_map[status_value]
-                else:
+                
+                # Validate status is within acceptable range (0-30)
+                if not isinstance(status_value, int) or status_value < 0 or status_value > 30:
                     return create_error_response(
-                        error_message=f'Invalid status value: {status_value}. Valid values are: 0 (assigned), 1 (in_progress), 2 (completed), 3 (cancelled).',
+                        error_message=f'Invalid status value: {status_value}. Valid values are: 0-30.',
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'status': [f'Invalid status value: {status_value}. Valid values are: 0, 1, 2, 3.']}
+                        errors={'status': [f'Invalid status value: {status_value}. Valid values are: 0-30.']}
                     )
+                
+                # Map status values to Delivery model statuses
+                # 0 = assigned, 1 = in_progress, 2 = completed, 3 = cancelled
+                # 4-30 = map to in_progress (intermediate statuses)
+                if status_value == 0:
+                    delivery.status = 'assigned'
+                elif status_value == 1:
+                    delivery.status = 'in_progress'
+                elif status_value == 2:
+                    delivery.status = 'completed'
+                elif status_value == 3:
+                    delivery.status = 'cancelled'
+                else:
+                    # Status values 4-30 map to in_progress (intermediate/custom statuses)
+                    delivery.status = 'in_progress'
             
             # Update delivery date if provided
             if validated_data.get('deliveryDate'):
