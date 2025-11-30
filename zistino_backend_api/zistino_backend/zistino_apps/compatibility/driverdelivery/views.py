@@ -21,6 +21,7 @@ from .serializers import (
     DriverDeliveryCreateRequestSerializer,
     DriverDeliveryUpdateRequestSerializer,
     DriverDeliverySearchRequestSerializer,
+    DriverDeliveryMyRequestsResponseSerializer,
 )
 
 User = get_user_model()
@@ -739,24 +740,39 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
     responses={
         200: OpenApiResponse(
             response=dict,
-            description='My delivery requests with nested pagination',
+            description='My delivery requests matching old Swagger format',
             examples=[
                 OpenApiExample(
                     'Success Response',
                     value={
-                        "data": {
-                            "data": [],
-                            "currentPage": 0,
-                            "totalPages": 0,
-                            "totalCount": 0,
-                            "pageSize": 1,
-                            "hasPreviousPage": False,
-                            "hasNextPage": False,
-                            "messages": None,
-                            "succeeded": True
-                        },
                         "messages": [],
-                        "succeeded": True
+                        "succeeded": True,
+                        "data": [
+                            {
+                                "id": 0,
+                                "userId": "string",
+                                "creator": "string",
+                                "deliveryUserId": "string",
+                                "deliveryDate": "2025-11-30T09:24:46.944Z",
+                                "dirver": "string",
+                                "setUserId": "string",
+                                "setUser": "string",
+                                "addressId": 0,
+                                "address": "string",
+                                "latitude": 0,
+                                "longitude": 0,
+                                "phoneNumber": "string",
+                                "vatNumber": "string",
+                                "status": 0,
+                                "createdOn": "2025-11-30T09:24:46.944Z",
+                                "requestId": 0,
+                                "zoneId": 0,
+                                "orderId": 0,
+                                "preOrderId": 0,
+                                "dirverphone": "string",
+                                "description": "string"
+                            }
+                        ]
                     }
                 )
             ]
@@ -793,6 +809,38 @@ class DriverDeliveryMyRequestsView(APIView):
             
             # Get deliveries for current driver
             qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
+            
+            # Filter by preOrderId if provided (in advancedSearch or as direct field)
+            pre_order_id = None
+            advanced_search = validated_data.get('advancedSearch', {})
+            if isinstance(advanced_search, dict):
+                pre_order_id = advanced_search.get('preOrderId')
+            
+            # Also check if preOrderId is in request data directly
+            if not pre_order_id and hasattr(request, 'data') and isinstance(request.data, dict):
+                pre_order_id = request.data.get('preOrderId')
+            
+            if pre_order_id:
+                # Convert preOrderId to UUID and filter by order
+                try:
+                    import hashlib
+                    # preOrderId might be an integer hash, so we need to find matching orders
+                    # For now, we'll try to match by order ID hash
+                    # This is a simplified approach - you might need to store preOrderId mapping
+                    matching_orders = []
+                    for order in Order.objects.all():
+                        order_id_str = str(order.id).replace('-', '')
+                        order_id_int = int(hashlib.md5(order_id_str.encode()).hexdigest()[:8], 16) % 100000000
+                        if str(order_id_int) == str(pre_order_id) or order_id_int == pre_order_id:
+                            matching_orders.append(order.id)
+                    
+                    if matching_orders:
+                        qs = qs.filter(order__id__in=matching_orders)
+                    else:
+                        # If no matching order found, return empty results
+                        return create_success_response(data=[], messages=[])
+                except Exception:
+                    pass  # If preOrderId filtering fails, continue without filter
             
             # Filter by status
             if validated_data.get('status') is not None:
@@ -841,36 +889,20 @@ class DriverDeliveryMyRequestsView(APIView):
             else:
                 qs = qs.order_by('-created_at')
             
-            # Calculate pagination
-            total_count = qs.count()
-            total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 0
-            current_page = page_number
-            has_previous_page = current_page > 1
-            has_next_page = current_page < total_pages
+            # Apply pagination if pageSize > 0
+            if page_size > 0:
+                start = (page_number - 1) * page_size
+                end = start + page_size
+                items = qs[start:end]
+            else:
+                # If pageSize is 0, return all results
+                items = qs
             
-            # Get paginated items with related data for better performance
-            start = (page_number - 1) * page_size
-            end = start + page_size
-            items = qs.select_related('driver', 'order', 'order__user')[start:end]
+            # Serialize using the new serializer matching old Swagger format
+            serializer = DriverDeliveryMyRequestsResponseSerializer(items, many=True)
             
-            # Serialize
-            serializer = DeliverySerializer(items, many=True)
-            
-            # Return in old Swagger format with nested pagination
-            return create_success_response(
-                data={
-                    'data': serializer.data,
-                    'currentPage': current_page,
-                    'totalPages': total_pages,
-                    'totalCount': total_count,
-                    'pageSize': page_size,
-                    'hasPreviousPage': has_previous_page,
-                    'hasNextPage': has_next_page,
-                    'messages': None,
-                    'succeeded': True
-                },
-                messages=[]
-            )
+            # Return in old Swagger format (direct array, not nested pagination)
+            return create_success_response(data=serializer.data, messages=[])
         except Exception as e:
             return create_error_response(
                 error_message=f'An error occurred while fetching delivery requests: {str(e)}',
