@@ -152,7 +152,19 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
         return ""
     
     def get_status(self, obj):
-        """Return status as integer (0=assigned, 1=in_progress, 2=completed, 3=cancelled)."""
+        """Return status as integer. If status_number exists, return it; otherwise map from status string."""
+        # Try to get status_number if it exists (after migration)
+        # Use try/except to handle case where column doesn't exist in database
+        try:
+            # Check if field exists in model
+            if 'status_number' in [f.name for f in obj._meta.get_fields()]:
+                status_num = getattr(obj, 'status_number', None)
+                if status_num is not None:
+                    return status_num
+        except (AttributeError, Exception):
+            pass  # Field doesn't exist or can't be accessed
+        
+        # Otherwise, map from status string (backward compatibility)
         status_map = {'assigned': 0, 'in_progress': 1, 'completed': 2, 'cancelled': 3}
         return status_map.get(obj.status, 0)
     
