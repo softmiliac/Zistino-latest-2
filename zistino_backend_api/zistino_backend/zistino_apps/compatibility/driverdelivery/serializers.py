@@ -33,13 +33,24 @@ class DriverDeliveryUpdateRequestSerializer(serializers.Serializer):
     deliveryDate = serializers.DateTimeField(required=False, allow_null=True, help_text='Delivery date')
     setUserId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Set User ID (UUID string)')
     addressId = serializers.IntegerField(required=False, allow_null=True, help_text='Address ID')
-    orderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Order ID (UUID string)')
-    examId = serializers.IntegerField(required=False, allow_null=True, help_text='Exam ID')
+    address = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Delivery address')
+    phoneNumber = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Phone number')
+    latitude = serializers.DecimalField(required=False, allow_null=True, max_digits=9, decimal_places=6, help_text='Latitude')
+    longitude = serializers.DecimalField(required=False, allow_null=True, max_digits=9, decimal_places=6, help_text='Longitude')
+    orderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Order ID (UUID string or integer hash)')
+    examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID')
     requestId = serializers.IntegerField(required=False, allow_null=True, help_text='Request ID')
     zoneId = serializers.IntegerField(required=False, allow_null=True, help_text='Zone ID')
-    preOrderId = serializers.IntegerField(required=False, allow_null=True, help_text='Pre Order ID')
+    preOrderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Pre Order ID')
     status = serializers.IntegerField(required=False, allow_null=True, help_text='Delivery status (0=assigned, 1=in_progress, 2=completed, 3=cancelled)')
     description = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Description')
+    deliveredWeight = serializers.DecimalField(required=False, allow_null=True, max_digits=10, decimal_places=2, help_text='Delivered weight in kg')
+    reminderSmsSent = serializers.BooleanField(required=False, allow_null=True, help_text='Whether reminder SMS has been sent')
+    licensePlateNumber = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=20, help_text='License plate number')
+    customerConfirmationStatus = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Customer confirmation status (pending, confirmed, denied)')
+    denialReason = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Reason if delivery is denied')
+    cancelReason = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Reason if delivery is cancelled')
+    confirmedAt = serializers.DateTimeField(required=False, allow_null=True, help_text='Timestamp when customer confirmed the delivery')
 
 
 class DriverDeliverySearchRequestSerializer(serializers.Serializer):
@@ -81,6 +92,7 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
     zoneId = serializers.SerializerMethodField()
     orderId = serializers.SerializerMethodField()
     preOrderId = serializers.SerializerMethodField()
+    examId = serializers.SerializerMethodField()
     dirverphone = serializers.SerializerMethodField()
     description = serializers.CharField(allow_blank=True)
     
@@ -162,21 +174,27 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
         return 0
     
     def get_orderId(self, obj):
-        """Return order ID as integer hash for compatibility (matching OrderCompatibilitySerializer)."""
+        """Return order ID as string (integer hash for compatibility, matching OrderCompatibilitySerializer)."""
         if obj.order:
             import hashlib
             # Use same hash calculation as OrderCompatibilitySerializer.get_id()
             uuid_str = str(obj.order.id)
             hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
             hash_int = int(hash_obj.hexdigest(), 16)
-            return hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
-        return 0
+            order_id_hash = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
+            return str(order_id_hash)  # Return as string to match request format
+        return "0"
     
     def get_preOrderId(self, obj):
-        """Return preOrderId (same as orderId for now)."""
+        """Return preOrderId as string (same as orderId for now)."""
         # preOrderId should be the same as orderId in most cases
         # Use same calculation as get_orderId to ensure consistency
         return self.get_orderId(obj)
+    
+    def get_examId(self, obj):
+        """Return examId as string (default '0' for compatibility)."""
+        # examId is not used in the current system, return '0' as default
+        return "0"
     
     def get_dirverphone(self, obj):
         """Return driver phone number."""
