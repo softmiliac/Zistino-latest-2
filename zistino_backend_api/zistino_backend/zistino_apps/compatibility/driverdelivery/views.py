@@ -450,10 +450,18 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                         errors={'orderId': [f'Order with ID "{order_id}" not found.']}
                     )
             
-            # Update status if provided
+            # Update status if provided (allows changing from any status to any other status)
             if validated_data.get('status') is not None:
                 status_map = {0: 'assigned', 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
-                delivery.status = status_map.get(validated_data['status'], 'assigned')
+                status_value = validated_data['status']
+                if status_value in status_map:
+                    delivery.status = status_map[status_value]
+                else:
+                    return create_error_response(
+                        error_message=f'Invalid status value: {status_value}. Valid values are: 0 (assigned), 1 (in_progress), 2 (completed), 3 (cancelled).',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'status': [f'Invalid status value: {status_value}. Valid values are: 0, 1, 2, 3.']}
+                    )
             
             # Update delivery date if provided
             if validated_data.get('deliveryDate'):
@@ -462,6 +470,69 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             # Update description if provided
             if validated_data.get('description') is not None:
                 delivery.description = validated_data['description']
+            
+            # Update address if provided (from addressId or direct address field)
+            address_id = validated_data.get('addressId')
+            address_text = validated_data.get('address')
+            if address_id and address_id != 0:
+                try:
+                    address_obj = Address.objects.get(id=address_id)
+                    delivery.address = address_obj.address or delivery.address
+                    delivery.phone_number = address_obj.phone_number or delivery.phone_number
+                except Address.DoesNotExist:
+                    pass  # If addressId not found, keep existing address
+            elif address_text:
+                delivery.address = address_text
+            
+            # Update phone number if provided
+            phone_number = validated_data.get('phoneNumber')
+            if phone_number:
+                delivery.phone_number = phone_number
+            
+            # Update latitude if provided
+            if validated_data.get('latitude') is not None:
+                delivery.latitude = validated_data['latitude']
+            
+            # Update longitude if provided
+            if validated_data.get('longitude') is not None:
+                delivery.longitude = validated_data['longitude']
+            
+            # Update delivered weight if provided
+            if validated_data.get('deliveredWeight') is not None:
+                delivery.delivered_weight = validated_data['deliveredWeight']
+            
+            # Update reminder SMS sent if provided
+            if validated_data.get('reminderSmsSent') is not None:
+                delivery.reminder_sms_sent = validated_data['reminderSmsSent']
+            
+            # Update license plate number if provided
+            if validated_data.get('licensePlateNumber') is not None:
+                delivery.license_plate_number = validated_data['licensePlateNumber']
+            
+            # Update customer confirmation status if provided
+            customer_confirmation_status = validated_data.get('customerConfirmationStatus')
+            if customer_confirmation_status:
+                valid_statuses = ['pending', 'confirmed', 'denied']
+                if customer_confirmation_status in valid_statuses:
+                    delivery.customer_confirmation_status = customer_confirmation_status
+                else:
+                    return create_error_response(
+                        error_message=f'Invalid customer confirmation status: {customer_confirmation_status}. Valid values are: pending, confirmed, denied.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'customerConfirmationStatus': [f'Invalid status. Valid values are: pending, confirmed, denied.']}
+                    )
+            
+            # Update denial reason if provided
+            if validated_data.get('denialReason') is not None:
+                delivery.denial_reason = validated_data['denialReason']
+            
+            # Update cancel reason if provided
+            if validated_data.get('cancelReason') is not None:
+                delivery.cancel_reason = validated_data['cancelReason']
+            
+            # Update confirmed at if provided
+            if validated_data.get('confirmedAt'):
+                delivery.confirmed_at = validated_data['confirmedAt']
             
             delivery.save()
             
