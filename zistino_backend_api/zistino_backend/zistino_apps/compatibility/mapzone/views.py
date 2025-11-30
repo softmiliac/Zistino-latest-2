@@ -564,7 +564,7 @@ class MapZoneViewSet(viewsets.ModelViewSet):
 )
 class MapZoneSearchUserInZoneView(APIView):
     """POST /api/v1/mapzone/searchuserinzone - Search users in zone"""
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated]  # Allow all authenticated users (customers, drivers, managers)
 
     def post(self, request):
         """Search users in a specific zone matching old Swagger format."""
