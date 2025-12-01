@@ -38,6 +38,7 @@ class Order(models.Model):
     user_phone_number = models.CharField(max_length=15, blank=True, null=True)
     latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True, help_text='Customer location latitude')
     longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True, help_text='Customer location longitude')
+    zone_id = models.IntegerField(blank=True, null=True, help_text='Zone ID assigned to this order (can be set directly or calculated from latitude/longitude)')
     estimated_weight_range = models.CharField(max_length=20, blank=True, null=True, help_text='Estimated weight range selected by customer (e.g., "2-5", "5-10", "10-20" in kg)')
     preferred_delivery_date = models.DateTimeField(blank=True, null=True, help_text='Preferred delivery date and time selected by customer')
     created_at = models.DateTimeField(auto_now_add=True)
