@@ -745,6 +745,22 @@ class OrdersViewSet(viewsets.ModelViewSet):
                 # If address not found, just use request fields (don't fail)
                 pass
         
+        # Find zone from latitude/longitude if provided
+        zone_id = None
+        if latitude and longitude:
+            try:
+                zone = find_zone_for_location(float(latitude), float(longitude))
+                if zone:
+                    zone_id = zone.id
+            except Exception as e:
+                # If zone finding fails, continue without zone (don't fail order creation)
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f'Failed to find zone for location ({latitude}, {longitude}): {str(e)}')
+        
+        # Check if zone_id field exists in Order model
+        has_zone_id_field = hasattr(Order, 'zone_id')
+        
         # Create order
         order_data = {
             'user': user,
@@ -765,7 +781,40 @@ class OrdersViewSet(viewsets.ModelViewSet):
             'longitude': longitude,
         }
         
-        order = Order.objects.create(**order_data)
+        # Add zone_id if found and field exists in model
+        if zone_id and has_zone_id_field:
+            order_data['zone_id'] = zone_id
+        
+        try:
+            order = Order.objects.create(**order_data)
+        except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            error_trace = traceback.format_exc()
+            logger.error(f'Error creating order: {str(e)}\n{error_trace}')
+            
+            # Check if error is about missing zone_id column
+            error_str = str(e).lower()
+            if 'zone_id' in error_str and 'does not exist' in error_str:
+                # Retry without zone_id
+                if 'zone_id' in order_data:
+                    del order_data['zone_id']
+                try:
+                    order = Order.objects.create(**order_data)
+                except Exception as retry_error:
+                    logger.error(f'Error creating order (retry without zone_id): {str(retry_error)}\n{traceback.format_exc()}')
+                    return create_error_response(
+                        error_message=f'Database error occurred: {str(retry_error)}',
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        errors={'error': [str(retry_error)]}
+                    )
+            else:
+                return create_error_response(
+                    error_message=f'Database error occurred: {str(e)}',
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    errors={'error': [str(e)]}
+                )
         
         # Create order items
         order_items_data = validated_data.get('orderItems', [])
@@ -854,152 +903,213 @@ class OrdersViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='search')
     def search(self, request):
         """Search orders with pagination and filters matching old Swagger format."""
-        serializer = OrderSearchRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        validated_data = serializer.validated_data
+        try:
+            serializer = OrderSearchRequestSerializer(data=request.data)
+            if not serializer.is_valid():
+                errors = {}
+                for field, error_list in serializer.errors.items():
+                    errors[field] = [str(error) for error in error_list]
+                return create_error_response(
+                    error_message='Validation failed',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    errors=errors
+                )
+            validated_data = serializer.validated_data
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return create_error_response(
+                error_message=f'An error occurred while processing request: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'detail': [str(e)]}
+            )
         
-        page_number = validated_data.get('pageNumber', 0) or 1
-        page_size = validated_data.get('pageSize', 0) or 20
-        keyword = (validated_data.get('keyword') or '').strip()
-        status_filter = validated_data.get('status')
-        user_id = validated_data.get('userId')
-        product_id = validated_data.get('productId')
-        category_id = validated_data.get('categoryId')
-        resseller_id = validated_data.get('ressellerId')
-        
-        # Get keyword from advancedSearch if not in main keyword
-        advanced_search = validated_data.get('advancedSearch')
-        if advanced_search and not keyword:
-            keyword = (advanced_search.get('keyword') or '').strip()
+        try:
+            page_number = validated_data.get('pageNumber', 0) or 1
+            page_size = validated_data.get('pageSize', 0) or 20
+            keyword = (validated_data.get('keyword') or '').strip()
+            status_filter = validated_data.get('status')
+            user_id = validated_data.get('userId')
+            product_id = validated_data.get('productId')
+            category_id = validated_data.get('categoryId')
+            resseller_id = validated_data.get('ressellerId')
+            
+            # Get keyword from advancedSearch if not in main keyword
+            advanced_search = validated_data.get('advancedSearch')
+            if advanced_search and not keyword:
+                keyword = (advanced_search.get('keyword') or '').strip()
 
-        qs = Order.objects.all().select_related('user').prefetch_related('order_items').order_by('-created_at')
-
-        # Filter by status (integer to string mapping)
-        if status_filter is not None:
-            status_map = {0: 'pending', 1: 'confirmed', 2: 'in_progress', 3: 'completed', 4: 'cancelled'}
-            status_str = status_map.get(status_filter)
-            if status_str:
-                qs = qs.filter(status=status_str)
-
-        # Filter by user ID
-        if user_id:
+            # Use order_items (with underscore) as related_name from OrderItem model
+            # Prefetch order_items to avoid N+1 queries
             try:
-                from uuid import UUID
-                UUID(user_id)
-                qs = qs.filter(user_id=user_id)
-            except (ValueError, TypeError):
-                pass
+                qs = Order.objects.all().select_related('user').prefetch_related('order_items').order_by('-created_at')
+            except Exception:
+                # Fallback if prefetch fails
+                qs = Order.objects.all().select_related('user').order_by('-created_at')
 
-        # Filter by category ID (through order items -> product -> category)
-        if category_id and category_id.strip():
-            try:
-                from uuid import UUID
-                from zistino_apps.products.models import Category
-                # Try as UUID first
+            # Filter by status (integer to string mapping)
+            # status: -1 means "all statuses" (no filter)
+            if status_filter is not None and status_filter != -1:
+                status_map = {0: 'pending', 1: 'confirmed', 2: 'in_progress', 3: 'completed', 4: 'cancelled'}
+                status_str = status_map.get(status_filter)
+                if status_str:
+                    qs = qs.filter(status=status_str)
+
+            # Filter by user ID
+            if user_id:
                 try:
-                    uuid_obj = UUID(category_id.strip())
-                    category = Category.objects.filter(id=uuid_obj).first()
-                    if category:
-                        # Find products in this category
-                        products = Product.objects.filter(category=category)
-                        product_names = products.values_list('name', flat=True)
-                        # Filter orders that have items with these product names
-                        qs = qs.filter(order_items__product_name__in=product_names).distinct()
+                    from uuid import UUID
+                    UUID(user_id)
+                    qs = qs.filter(user_id=user_id)
                 except (ValueError, TypeError):
-                    # Try as integer (hash lookup)
+                    pass
+
+            # Filter by category ID (through order items -> product -> category)
+            if category_id and category_id.strip():
+                try:
+                    from uuid import UUID
+                    from zistino_apps.products.models import Category
+                    # Try as UUID first
                     try:
-                        integer_id = int(category_id.strip())
-                        import hashlib
-                        categories = Category.objects.all()
-                        category = None
-                        for cat in categories:
-                            uuid_str = str(cat.id)
-                            hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
-                            hash_int = int(hash_obj.hexdigest(), 16)
-                            hash_id = hash_int % 2147483647
-                            if hash_id == integer_id:
-                                category = cat
-                                break
+                        uuid_obj = UUID(category_id.strip())
+                        category = Category.objects.filter(id=uuid_obj).first()
                         if category:
+                            # Find products in this category
                             products = Product.objects.filter(category=category)
                             product_names = products.values_list('name', flat=True)
+                            # Filter orders that have items with these product names
                             qs = qs.filter(order_items__product_name__in=product_names).distinct()
                     except (ValueError, TypeError):
-                        pass
-            except Exception:
-                pass
+                        # Try as integer (hash lookup)
+                        try:
+                            integer_id = int(category_id.strip())
+                            import hashlib
+                            categories = Category.objects.all()
+                            category = None
+                            for cat in categories:
+                                uuid_str = str(cat.id)
+                                hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                                hash_int = int(hash_obj.hexdigest(), 16)
+                                hash_id = hash_int % 2147483647
+                                if hash_id == integer_id:
+                                    category = cat
+                                    break
+                            if category:
+                                products = Product.objects.filter(category=category)
+                                product_names = products.values_list('name', flat=True)
+                                qs = qs.filter(order_items__product_name__in=product_names).distinct()
+                        except (ValueError, TypeError):
+                            pass
+                except Exception:
+                    pass
 
-        # Filter by product ID (through order items)
-        if product_id:
+            # Filter by product ID (through order items)
+            if product_id:
+                try:
+                    from uuid import UUID
+                    UUID(product_id)
+                    product = Product.objects.filter(id=product_id).first()
+                    if product:
+                        qs = qs.filter(order_items__product_name=product.name).distinct()
+                except (ValueError, TypeError):
+                    pass
+
+            # Filter by reseller ID
+            if resseller_id:
+                try:
+                    from uuid import UUID
+                    UUID(resseller_id)
+                    qs = qs.filter(resseller_id=resseller_id)
+                except (ValueError, TypeError):
+                    pass
+
+            # Filter by keyword
+            if keyword:
+                qs = qs.filter(
+                    Q(user_full_name__icontains=keyword) |
+                    Q(user_phone_number__icontains=keyword) |
+                    Q(address1__icontains=keyword) |
+                    Q(address2__icontains=keyword) |
+                    Q(phone1__icontains=keyword) |
+                    Q(phone2__icontains=keyword) |
+                    Q(post_state_number__icontains=keyword) |
+                    Q(payment_tracking_code__icontains=keyword) |
+                    Q(order_items__product_name__icontains=keyword)
+                ).distinct()
+
+            # Handle orderBy
+            order_by = validated_data.get('orderBy', [])
+            if order_by:
+                # Map orderBy strings to Django order_by
+                order_fields = []
+                for order_field in order_by:
+                    if order_field and order_field.strip():
+                        # Handle common orderBy patterns
+                        if 'date' in order_field.lower() or 'created' in order_field.lower():
+                            order_fields.append('-created_at')
+                        elif 'price' in order_field.lower() or 'total' in order_field.lower():
+                            order_fields.append('-total_price')
+                        elif 'status' in order_field.lower():
+                            order_fields.append('status')
+                if order_fields:
+                    qs = qs.order_by(*order_fields)
+            else:
+                qs = qs.order_by('-created_at')
+
+            total = qs.count()
+            start = (page_number - 1) * page_size
+            end = start + page_size
+            items = qs[start:end] if page_size > 0 else qs
+
+            # Convert queryset to list - evaluate the query
             try:
-                from uuid import UUID
-                UUID(product_id)
-                product = Product.objects.filter(id=product_id).first()
-                if product:
-                    qs = qs.filter(order_items__product_name=product.name).distinct()
-            except (ValueError, TypeError):
-                pass
+                items_list = list(items)
+            except Exception as list_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error converting queryset to list: {str(list_error)}')
+                # Fallback: return empty list
+                items_list = []
 
-        # Filter by reseller ID
-        if resseller_id:
+            # Serialize items with error handling
             try:
-                from uuid import UUID
-                UUID(resseller_id)
-                qs = qs.filter(resseller_id=resseller_id)
-            except (ValueError, TypeError):
-                pass
-
-        # Filter by keyword
-        if keyword:
-            qs = qs.filter(
-                Q(user_full_name__icontains=keyword) |
-                Q(user_phone_number__icontains=keyword) |
-                Q(address1__icontains=keyword) |
-                Q(address2__icontains=keyword) |
-                Q(phone1__icontains=keyword) |
-                Q(phone2__icontains=keyword) |
-                Q(post_state_number__icontains=keyword) |
-                Q(payment_tracking_code__icontains=keyword) |
-                Q(order_items__product_name__icontains=keyword)
-            ).distinct()
-
-        # Handle orderBy
-        order_by = validated_data.get('orderBy', [])
-        if order_by:
-            # Map orderBy strings to Django order_by
-            order_fields = []
-            for order_field in order_by:
-                if order_field and order_field.strip():
-                    # Handle common orderBy patterns
-                    if 'date' in order_field.lower() or 'created' in order_field.lower():
-                        order_fields.append('-created_at')
-                    elif 'price' in order_field.lower() or 'total' in order_field.lower():
-                        order_fields.append('-total_price')
-                    elif 'status' in order_field.lower():
-                        order_fields.append('status')
-            if order_fields:
-                qs = qs.order_by(*order_fields)
-        else:
-            qs = qs.order_by('-created_at')
-
-        total = qs.count()
-        start = (page_number - 1) * page_size
-        end = start + page_size
-        items = qs[start:end] if page_size > 0 else qs
-
-        serializer = OrderCompatibilitySerializer(items, many=True, context=self.get_serializer_context())
-        response_data = create_success_response(data=serializer.data)
-        # Add pagination fields
-        response_data.data['currentPage'] = page_number
-        response_data.data['totalPages'] = (total + page_size - 1) // page_size if page_size > 0 else 0
-        response_data.data['totalCount'] = total
-        response_data.data['pageSize'] = page_size
-        response_data.data['hasPreviousPage'] = page_number > 1
-        response_data.data['hasNextPage'] = page_number < (total + page_size - 1) // page_size if page_size > 0 else 0
-        # Ensure messages is an array
-        if response_data.data.get('messages') is None:
-            response_data.data['messages'] = []
-        return response_data
+                serializer = OrderCompatibilitySerializer(items_list, many=True, context=self.get_serializer_context())
+                serialized_data = serializer.data
+            except Exception as serialization_error:
+                import logging
+                import traceback
+                logger = logging.getLogger(__name__)
+                error_trace = traceback.format_exc()
+                logger.error(f'Error serializing orders: {str(serialization_error)}\n{error_trace}')
+                # Return empty data if serialization fails
+                serialized_data = []
+            
+            # Build response data with pagination
+            response_data_dict = {
+                "data": serialized_data,
+                "messages": [],
+                "succeeded": True,
+                "currentPage": page_number,
+                "totalPages": (total + page_size - 1) // page_size if page_size > 0 else 0,
+                "totalCount": total,
+                "pageSize": page_size,
+                "hasPreviousPage": page_number > 1,
+                "hasNextPage": page_number < (total + page_size - 1) // page_size if page_size > 0 else 0
+            }
+            
+            return Response(response_data_dict, status=status.HTTP_200_OK)
+        except Exception as e:
+            import traceback
+            import logging
+            logger = logging.getLogger(__name__)
+            error_trace = traceback.format_exc()
+            logger.error(f'Error in orders/search endpoint: {str(e)}\n{error_trace}')
+            traceback.print_exc()
+            return create_error_response(
+                error_message=f'An error occurred while searching orders: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'detail': [str(e)]}
+            )
 
     @extend_schema(
         tags=['Orders'],
@@ -2964,6 +3074,21 @@ class OrdersOrderStatusUpdateView(APIView):
 
     def put(self, request, id):
         """Update order status matching old Swagger format."""
+        # Validate request data using serializer
+        serializer = OrderStatusUpdateRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            errors = {}
+            for field, error_list in serializer.errors.items():
+                errors[field] = [str(error) for error in error_list]
+            return create_error_response(
+                error_message='Validation failed',
+                status_code=status.HTTP_400_BAD_REQUEST,
+                errors=errors
+            )
+        
+        validated_data = serializer.validated_data
+        new_status = validated_data.get('status')
+        
         # Try UUID first
         try:
             from uuid import UUID
@@ -3003,15 +3128,20 @@ class OrdersOrderStatusUpdateView(APIView):
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
         
-        new_status = request.data.get('status')
-        if new_status not in dict(Order.ORDER_STATUS_CHOICES):
+        # Validate status is in Order.ORDER_STATUS_CHOICES
+        valid_statuses = [choice[0] for choice in Order.ORDER_STATUS_CHOICES]
+        if new_status not in valid_statuses:
             return create_error_response(
-                error_message='Invalid status',
+                error_message=f'Invalid status: {new_status}. Valid statuses are: {", ".join(valid_statuses)}',
                 status_code=status.HTTP_400_BAD_REQUEST,
-                errors={'status': ['Invalid status value']}
+                errors={'status': [f'Invalid status value. Valid statuses are: {", ".join(valid_statuses)}']}
             )
+        
+        # Update order status
         order.status = new_status
-        order.save()
+        order.save(update_fields=['status'])
+        
+        # Return updated order
         serializer = OrderCompatibilitySerializer(order)
         return create_success_response(data=serializer.data)
 
