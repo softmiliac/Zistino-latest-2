@@ -456,15 +456,28 @@ class LocationsViewSet(viewsets.ViewSet):
             # Filter by userId if provided
             user_id = validated_data.get('userId')
             if user_id:
-                try:
-                    user = User.objects.get(id=user_id)
-                    qs = qs.filter(user=user)
-                except User.DoesNotExist:
-                    return create_error_response(
-                        error_message=f'User with ID "{user_id}" not found.',
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        errors={'userId': [f'User with ID "{user_id}" not found.']}
-                    )
+                # Strip whitespace and handle empty strings
+                user_id = str(user_id).strip()
+                if user_id:
+                    try:
+                        # Try to parse as UUID
+                        import uuid
+                        user_uuid = uuid.UUID(user_id)
+                        user = User.objects.get(id=user_uuid)
+                        qs = qs.filter(user=user)
+                    except (ValueError, TypeError):
+                        # If not a valid UUID, return error
+                        return create_error_response(
+                            error_message=f'Invalid user ID format: "{user_id}". Expected UUID.',
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            errors={'userId': [f'Invalid user ID format. Expected UUID.']}
+                        )
+                    except User.DoesNotExist:
+                        return create_error_response(
+                            error_message=f'User with ID "{user_id}" not found.',
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            errors={'userId': [f'User with ID "{user_id}" not found.']}
+                        )
             
             # Filter by tripId if provided
             trip_id = validated_data.get('tripId')
