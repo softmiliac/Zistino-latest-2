@@ -79,7 +79,7 @@ const Products: FC = () => {
               return String(x.id) === String(categoryId) ||
                 (typeof x.id === 'number' && typeof categoryId === 'number' && x.id === categoryId);
             }
-          );
+        );
           // Return category name if found, otherwise try to get name from parsedValue
           return category?.name || parsedValue[0]?.name || "";
         }
