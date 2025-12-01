@@ -339,12 +339,16 @@ class TransactionWalletViewSet(viewsets.ModelViewSet):
                 transaction.transaction_type = transaction_type_map.get(validated_data['type'], 'credit')
             
             # Map status
-            if 'status' in validated_data or 'finished' in validated_data:
+            # Priority: status field > finished field
+            if 'status' in validated_data:
                 status_map = {0: 'pending', 1: 'completed', 2: 'failed', 3: 'cancelled'}
+                transaction.status = status_map.get(validated_data['status'], 'pending')
+            elif 'finished' in validated_data:
+                # Only use finished if status is not provided
                 if validated_data.get('finished', False):
                     transaction.status = 'completed'
-                elif 'status' in validated_data:
-                    transaction.status = status_map.get(validated_data['status'], 'pending')
+                else:
+                    transaction.status = 'pending'
             
             # Update amount
             if 'price' in validated_data:
