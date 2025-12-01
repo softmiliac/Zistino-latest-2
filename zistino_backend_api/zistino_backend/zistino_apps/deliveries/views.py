@@ -26,6 +26,59 @@ from .serializers import (
 from .tasks import check_and_send_delivery_reminders
 
 
+def _status_number_column_exists():
+    """Check if status_number column exists in deliveries table. Cache the result."""
+    if not hasattr(_status_number_column_exists, '_cached_result'):
+        try:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                table_name = Delivery._meta.db_table
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name=%s AND column_name='status_number'
+                """, [table_name])
+                _status_number_column_exists._cached_result = cursor.fetchone() is not None
+        except Exception as e:
+            _status_number_column_exists._cached_result = False
+    return _status_number_column_exists._cached_result
+
+
+# List of all Delivery model fields (excluding status_number)
+_DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER = [
+    'id',
+    'driver_id',
+    'order_id',
+    'status',
+    'latitude',
+    'longitude',
+    'address',
+    'phone_number',
+    'delivery_date',
+    'delivered_weight',
+    'reminder_sms_sent',
+    'description',
+    'license_plate_number',
+    'customer_confirmation_status',
+    'denial_reason',
+    'cancel_reason',
+    'confirmed_at',
+    'created_at',
+    'updated_at',
+]
+
+
+def _apply_status_number_safe_query(qs):
+    """
+    Apply only() to queryset if status_number column doesn't exist.
+    This prevents Django from trying to SELECT a non-existent column.
+    """
+    column_exists = _status_number_column_exists()
+    if not column_exists:
+        return qs.only(*_DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER)
+    return qs
+
+
 @extend_schema(tags=['Driver'], exclude=True)  # Excluded: using compatibility layer instead
 class DeliveryViewSet(viewsets.ModelViewSet):
     """ViewSet for managing deliveries"""
@@ -2069,6 +2122,10 @@ class ManagerDisapprovalsView(APIView):
             if dt_to:
                 driver_non_deliveries = driver_non_deliveries.filter(updated_at__lte=dt_to)
 
+        # Apply safe query to exclude status_number if column doesn't exist
+        customer_denials = _apply_status_number_safe_query(customer_denials)
+        driver_non_deliveries = _apply_status_number_safe_query(driver_non_deliveries)
+        
         # Combine based on type filter
         items = []
         if disapproval_type in ['all', 'customer_denial']:
@@ -2567,6 +2624,7 @@ class ManagerWeightShortfallsView(APIView):
 
     def post(self, request):
         from django.utils.dateparse import parse_datetime
+        from django.db.models import Prefetch
         
         page_number = int(request.data.get('pageNumber') or 1)
         page_size = int(request.data.get('pageSize') or 20)
@@ -2575,7 +2633,16 @@ class ManagerWeightShortfallsView(APIView):
         date_from = request.data.get('dateFrom')
         date_to = request.data.get('dateTo')
 
-        qs = WeightShortfall.objects.all().select_related('user', 'delivery', 'deducted_from_delivery')
+        # Use Prefetch to exclude status_number field from delivery if column doesn't exist
+        delivery_qs = Delivery.objects.all()
+        if not _status_number_column_exists():
+            # Exclude status_number field if column doesn't exist
+            delivery_qs = delivery_qs.only(*_DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER)
+        
+        qs = WeightShortfall.objects.all().select_related('user').prefetch_related(
+            Prefetch('delivery', queryset=delivery_qs),
+            Prefetch('deducted_from_delivery', queryset=delivery_qs)
+        )
 
         # Filters
         if user_id:
@@ -2867,67 +2934,125 @@ class AdminDeliverySearchView(APIView):
 )
 class AdminDeliverySurveysSearchView(APIView):
     """Admin search endpoint for delivery surveys (user comments about drivers)."""
-    permission_classes = [IsAuthenticated, IsManager]
+    permission_classes = [IsAuthenticated]  # All authenticated users can view surveys
 
     def post(self, request):
         """Search delivery surveys with pagination."""
-        page_number = int(request.data.get('pageNumber') or 1)
-        page_size = int(request.data.get('pageSize') or 20)
-        keyword = (request.data.get('keyword') or '').strip()
+        import logging
+        logger = logging.getLogger(__name__)
         
-        qs = DeliverySurvey.objects.select_related('delivery__driver', 'user').order_by('-created_at')
-        
-        # Filter by keyword (search in comment, driver name, user name)
-        if keyword:
-            qs = qs.filter(
-                Q(comment__icontains=keyword) |
-                Q(delivery__driver__first_name__icontains=keyword) |
-                Q(delivery__driver__last_name__icontains=keyword) |
-                Q(user__first_name__icontains=keyword) |
-                Q(user__last_name__icontains=keyword) |
-                Q(user__phone_number__icontains=keyword)
-            )
-        
-        total = qs.count()
-        total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
-        
-        start = (page_number - 1) * page_size
-        end = start + page_size
-        items = qs[start:end]
-        
-        # Serialize with additional fields for frontend
-        surveys_data = []
-        for survey in items:
-            driver = survey.delivery.driver if survey.delivery and survey.delivery.driver else None
-            user = survey.user
+        try:
+            page_number = int(request.data.get('pageNumber') or 1)
+            page_size = int(request.data.get('pageSize') or 20)
+            keyword = (request.data.get('keyword') or '').strip()
             
-            driver_name = ''
-            if driver:
-                driver_name = f"{driver.first_name or ''} {driver.last_name or ''}".strip() or driver.phone_number or ''
+            # Start with base queryset - ensure delivery is not null
+            # Use Prefetch to exclude status_number field from delivery if column doesn't exist
+            from django.db.models import Prefetch
             
-            user_full_name = ''
-            if user:
-                user_full_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.phone_number or ''
+            delivery_qs = Delivery.objects.all()
+            if not _status_number_column_exists():
+                # Exclude status_number field if column doesn't exist
+                delivery_qs = delivery_qs.only(*_DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER)
             
-            surveys_data.append({
-                'id': str(survey.id),
-                'driverName': driver_name,
-                'userFullName': user_full_name,
-                'text': survey.comment or '',
-                'rate': survey.rating,
-                'created_at': survey.created_at.isoformat() if survey.created_at else None,
-            })
-        
-        return Response({
-            'data': surveys_data,
-            'currentPage': page_number,
-            'totalPages': total_pages,
-            'totalCount': total,
-            'pageSize': page_size,
-            'hasPreviousPage': page_number > 1,
-            'hasNextPage': page_number < total_pages,
-            'succeeded': True
-        }, status=status.HTTP_200_OK)
+            qs = DeliverySurvey.objects.filter(
+                delivery__isnull=False
+            ).select_related('user').prefetch_related(
+                Prefetch('delivery', queryset=delivery_qs.select_related('driver'))
+            ).order_by('-created_at')
+            
+            # Filter by keyword (search in comment, driver name, user name)
+            if keyword:
+                filter_conditions = Q(comment__icontains=keyword) | Q(user__first_name__icontains=keyword) | Q(user__last_name__icontains=keyword) | Q(user__phone_number__icontains=keyword)
+                
+                # Add driver filters (delivery__driver is already selected)
+                filter_conditions |= Q(delivery__driver__first_name__icontains=keyword)
+                filter_conditions |= Q(delivery__driver__last_name__icontains=keyword)
+                filter_conditions |= Q(delivery__driver__phone_number__icontains=keyword)
+                
+                qs = qs.filter(filter_conditions)
+            
+            total = qs.count()
+            total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
+            
+            start = (page_number - 1) * page_size
+            end = start + page_size
+            items = list(qs[start:end])  # Convert to list to evaluate query
+            
+            # Serialize with additional fields for frontend
+            surveys_data = []
+            for survey in items:
+                try:
+                    # Safely get driver - delivery and driver are already loaded via select_related
+                    driver = None
+                    if hasattr(survey, 'delivery') and survey.delivery:
+                        if hasattr(survey.delivery, 'driver') and survey.delivery.driver:
+                            driver = survey.delivery.driver
+                    
+                    user = getattr(survey, 'user', None)
+                    
+                    driver_name = ''
+                    if driver:
+                        try:
+                            first_name = getattr(driver, 'first_name', '') or ''
+                            last_name = getattr(driver, 'last_name', '') or ''
+                            driver_name = f"{first_name} {last_name}".strip()
+                            if not driver_name:
+                                driver_name = getattr(driver, 'phone_number', '') or ''
+                        except (AttributeError, Exception) as e:
+                            logger.warning(f'Error getting driver name for survey {survey.id}: {str(e)}')
+                            driver_name = ''
+                    
+                    user_full_name = ''
+                    if user:
+                        try:
+                            first_name = getattr(user, 'first_name', '') or ''
+                            last_name = getattr(user, 'last_name', '') or ''
+                            user_full_name = f"{first_name} {last_name}".strip()
+                            if not user_full_name:
+                                user_full_name = getattr(user, 'phone_number', '') or ''
+                        except (AttributeError, Exception) as e:
+                            logger.warning(f'Error getting user name for survey {survey.id}: {str(e)}')
+                            user_full_name = ''
+                    
+                    surveys_data.append({
+                        'id': str(survey.id),
+                        'driverName': driver_name,
+                        'userFullName': user_full_name,
+                        'text': getattr(survey, 'comment', '') or '',
+                        'rate': getattr(survey, 'rating', 0) or 0,
+                        'created_at': survey.created_at.isoformat() if hasattr(survey, 'created_at') and survey.created_at else None,
+                    })
+                except Exception as e:
+                    # Log error but continue with other surveys
+                    logger.error(f'Error processing survey {getattr(survey, "id", "unknown")}: {str(e)}', exc_info=True)
+                    continue
+            
+            return Response({
+                'data': surveys_data,
+                'currentPage': page_number,
+                'totalPages': total_pages,
+                'totalCount': total,
+                'pageSize': page_size,
+                'hasPreviousPage': page_number > 1,
+                'hasNextPage': page_number < total_pages,
+                'succeeded': True
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            # Log full error for debugging
+            logger.error(f'Error in AdminDeliverySurveysSearchView: {str(e)}', exc_info=True)
+            # Return error response with details
+            return Response({
+                'data': [],
+                'currentPage': 1,
+                'totalPages': 0,
+                'totalCount': 0,
+                'pageSize': 20,
+                'hasPreviousPage': False,
+                'hasNextPage': False,
+                'succeeded': False,
+                'messages': [f'An error occurred: {str(e)}']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @extend_schema(tags=['Manager'])
