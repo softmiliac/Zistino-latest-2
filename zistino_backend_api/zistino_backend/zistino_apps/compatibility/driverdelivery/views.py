@@ -34,12 +34,13 @@ def _status_number_column_exists():
         try:
             from django.db import connection
             with connection.cursor() as cursor:
-                # Use proper table name (might be schema.table)
+                # Check current database schema
+                table_name = Delivery._meta.db_table
                 cursor.execute("""
                     SELECT column_name 
                     FROM information_schema.columns 
-                    WHERE table_name='deliveries' AND column_name='status_number'
-                """)
+                    WHERE table_name=%s AND column_name='status_number'
+                """, [table_name])
                 _status_number_column_exists._cached_result = cursor.fetchone() is not None
         except Exception as e:
             # If check fails, assume column doesn't exist
@@ -458,18 +459,76 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                 'address': address_text,
                 'phone_number': phone_number
             }
-            # Only add status_number if the field exists in model (after migration)
-            # Check if field exists in model's _meta
-            if 'status_number' in [f.name for f in Delivery._meta.get_fields()]:
-                create_kwargs['status_number'] = status_number
+            # Only add status_number if the column exists in database (after migration)
+            # Check if column exists in database, not just in model
+            # Force fresh check (clear cache) to ensure accuracy
+            if hasattr(_status_number_column_exists, '_cached_result'):
+                delattr(_status_number_column_exists, '_cached_result')
             
+            column_exists = _status_number_column_exists()
+            
+            # Try to create delivery - if status_number column doesn't exist, Django will fail
+            # We'll catch the error and retry without status_number
             try:
+                if column_exists:
+                    create_kwargs['status_number'] = status_number
                 delivery = Delivery.objects.create(**create_kwargs)
             except Exception as e:
                 # If error is due to missing column, retry without status_number
-                if 'status_number' in str(e) or 'column' in str(e).lower():
+                error_str = str(e).lower()
+                if 'status_number' in error_str or ('column' in error_str and 'status_number' in str(e)):
+                    # Clear cache to force re-check next time
+                    if hasattr(_status_number_column_exists, '_cached_result'):
+                        delattr(_status_number_column_exists, '_cached_result')
+                    # Remove status_number from kwargs and retry
                     create_kwargs.pop('status_number', None)
-                    delivery = Delivery.objects.create(**create_kwargs)
+                    try:
+                        # Use raw SQL to insert without status_number if Django still tries to include it
+                        from django.db import connection
+                        from django.utils import timezone
+                        import uuid as uuid_module
+                        delivery_id = uuid_module.uuid4()
+                        now = timezone.now()
+                        delivery_date_val = validated_data.get('deliveryDate') or None
+                        
+                        with connection.cursor() as cursor:
+                            # Insert without status_number column - include all required fields and defaults
+                            cursor.execute("""
+                                INSERT INTO deliveries (
+                                    id, driver_id, order_id, status, address, phone_number,
+                                    delivery_date, description, delivered_weight, reminder_sms_sent,
+                                    customer_confirmation_status, created_at, updated_at
+                                ) VALUES (
+                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                )
+                            """, [
+                                delivery_id,
+                                driver.id,
+                                order.id,
+                                delivery_status,
+                                address_text,
+                                phone_number,
+                                delivery_date_val,
+                                validated_data.get('description', ''),
+                                0.0,  # delivered_weight default
+                                False,  # reminder_sms_sent default
+                                'pending',  # customer_confirmation_status default
+                                now,
+                                now
+                            ])
+                        
+                        # Fetch the created delivery using safe query (without status_number)
+                        delivery = _apply_status_number_safe_query(Delivery.objects.filter(id=delivery_id)).get()
+                    except Exception as retry_error:
+                        # If raw SQL also fails, try regular create one more time
+                        try:
+                            delivery = Delivery.objects.create(**create_kwargs)
+                        except Exception as final_error:
+                            return create_error_response(
+                                error_message=f'An error occurred while creating delivery: {str(final_error)}',
+                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                errors={'error': [str(final_error)]}
+                            )
                 else:
                     raise
             
@@ -647,9 +706,9 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                     # Status values 4-30 map to in_progress (intermediate/custom statuses)
                     delivery.status = 'in_progress'
                 
-                # Store original status number for response (if field exists in database)
-                # Check if field exists in model's _meta
-                if 'status_number' in [f.name for f in Delivery._meta.get_fields()]:
+                # Store original status number for response (if column exists in database)
+                # Check if column exists in database, not just in model
+                if _status_number_column_exists():
                     try:
                         delivery.status_number = status_value
                     except Exception:
