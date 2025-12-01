@@ -6,8 +6,8 @@ from rest_framework import serializers
 
 class RegisterRequestSerializer(serializers.Serializer):
     """Request serializer for registration matching old Swagger format."""
-    firstName = serializers.CharField(required=True, help_text='First name')
-    lastName = serializers.CharField(required=True, help_text='Last name')
+    firstName = serializers.CharField(required=False, allow_blank=True, default='', help_text='First name (optional, defaults to phoneNumber if empty)')
+    lastName = serializers.CharField(required=False, allow_blank=True, default='', help_text='Last name (optional)')
     email = serializers.EmailField(required=True, help_text='Email address')
     userName = serializers.CharField(required=True, help_text='Username')
     password = serializers.CharField(required=True, min_length=6, write_only=True, help_text='Password')
@@ -29,6 +29,7 @@ class RegisterRequestSerializer(serializers.Serializer):
     codeMeli = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='National ID (code meli)')
     representativeBy = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Representative by')
     companyId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Company ID')
+    appType = serializers.ChoiceField(required=False, choices=['customer', 'driver'], default='customer', help_text='App type: "customer" for customer app, "driver" for driver app. Defaults to "customer".')
     
     def validate(self, attrs):
         """Validate that password and confirmPassword match."""
@@ -45,8 +46,8 @@ class RegisterRequestSerializer(serializers.Serializer):
 
 class RegisterWithCodeRequestSerializer(serializers.Serializer):
     """Request serializer for registration with code matching old Swagger format."""
-    firstName = serializers.CharField(required=True, help_text='First name')
-    lastName = serializers.CharField(required=True, help_text='Last name')
+    firstName = serializers.CharField(required=False, allow_blank=True, default='', help_text='First name (optional, defaults to phoneNumber if empty)')
+    lastName = serializers.CharField(required=False, allow_blank=True, default='', help_text='Last name (optional)')
     email = serializers.EmailField(required=True, help_text='Email address')
     userName = serializers.CharField(required=True, help_text='Username')
     password = serializers.CharField(required=True, min_length=6, write_only=True, help_text='Password')
@@ -68,6 +69,7 @@ class RegisterWithCodeRequestSerializer(serializers.Serializer):
     codeMeli = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='National ID (code meli)')
     representativeBy = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Representative by')
     companyId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Company ID')
+    appType = serializers.ChoiceField(required=False, choices=['customer', 'driver'], default='customer', help_text='App type: "customer" for customer app, "driver" for driver app. Defaults to "customer".')
     
     def validate(self, attrs):
         """Validate that password and confirmPassword match."""
@@ -127,6 +129,7 @@ class RegisterWithPhoneCallRequestSerializer(serializers.Serializer):
     userInfo = RegisterRequestSerializer(required=True, help_text='User information')
     address = AddressSerializer(required=False, allow_null=True, help_text='Address information')
     delivery = DeliverySerializer(required=False, allow_null=True, help_text='Delivery information')
+    appType = serializers.ChoiceField(required=False, choices=['customer', 'driver'], default='customer', help_text='App type: "customer" for customer app, "driver" for driver app. Defaults to "customer".')
 
 
 class VerifyTokenRequestSerializer(serializers.Serializer):
