@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from django.db.models import Q
 from django.contrib.auth import get_user_model
+from datetime import datetime
 
 from zistino_apps.deliveries.models import Delivery
 from zistino_apps.orders.models import Order
@@ -51,10 +52,12 @@ def _status_number_column_exists():
 
 # List of all Delivery model fields (excluding status_number)
 # These are the fields that exist in the database before migration
+# Note: We include foreign key fields (driver_id, order_id) for select_related to work
+# But we don't need to include them in only() if we use select_related
 _DELIVERY_FIELDS_WITHOUT_STATUS_NUMBER = [
     'id',
-    'driver_id',  # ForeignKey field name in DB
-    'order_id',   # ForeignKey field name in DB
+    'driver_id',  # ForeignKey field name in DB (needed for select_related)
+    'order_id',   # ForeignKey field name in DB (needed for select_related)
     'status',
     'latitude',
     'longitude',
@@ -425,6 +428,12 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                         errors={'addressId': [f'Address with ID "{address_id}" not found.']}
                     )
             
+            # Get address and phoneNumber from validated_data if provided
+            if validated_data.get('address'):
+                address_text = validated_data.get('address')
+            if validated_data.get('phoneNumber'):
+                phone_number = validated_data.get('phoneNumber')
+            
             # Fallback to order address if addressId not provided or address is empty
             if not address_text and order:
                 address_text = order.address1 or ''
@@ -449,6 +458,51 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                         errors={'phone_number': ['Phone number is required.']}
                     )
             
+            # Get latitude/longitude from zoneId (highest priority), validated_data, order, or address
+            delivery_latitude = None
+            delivery_longitude = None
+            
+            # Method 1: Get from zoneId if provided (highest priority - as per Flutter requirement)
+            # Flutter says: "هر آدرس یک زون داره و هر زون یک latitude و longitude داره"
+            if validated_data.get('zoneId') and validated_data.get('zoneId') != 0:
+                try:
+                    from zistino_apps.users.models import Zone
+                    zone = Zone.objects.get(id=validated_data.get('zoneId'))
+                    if zone.center_latitude and zone.center_longitude:
+                        delivery_latitude = zone.center_latitude
+                        delivery_longitude = zone.center_longitude
+                except Zone.DoesNotExist:
+                    pass
+            
+            # Method 2: Get directly from validated_data if zoneId not provided
+            if not delivery_latitude and validated_data.get('latitude'):
+                try:
+                    delivery_latitude = float(validated_data.get('latitude'))
+                except (ValueError, TypeError):
+                    pass
+            
+            if not delivery_longitude and validated_data.get('longitude'):
+                try:
+                    delivery_longitude = float(validated_data.get('longitude'))
+                except (ValueError, TypeError):
+                    pass
+            
+            # Method 3: Get from order if not in request
+            if not delivery_latitude and order:
+                if order.latitude and order.longitude:
+                    delivery_latitude = order.latitude
+                    delivery_longitude = order.longitude
+            
+            # Method 4: Get from address if not in order
+            if not delivery_latitude and address_id and address_id != 0:
+                try:
+                    address_obj = Address.objects.get(id=address_id)
+                    if address_obj.latitude and address_obj.longitude:
+                        delivery_latitude = address_obj.latitude
+                        delivery_longitude = address_obj.longitude
+                except Address.DoesNotExist:
+                    pass
+            
             # Create delivery
             create_kwargs = {
                 'driver': driver,
@@ -459,6 +513,12 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                 'address': address_text,
                 'phone_number': phone_number
             }
+            
+            # Add latitude/longitude if available
+            if delivery_latitude:
+                create_kwargs['latitude'] = delivery_latitude
+            if delivery_longitude:
+                create_kwargs['longitude'] = delivery_longitude
             # Only add status_number if the column exists in database (after migration)
             # Check if column exists in database, not just in model
             # Force fresh check (clear cache) to ensure accuracy
@@ -493,29 +553,60 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                         
                         with connection.cursor() as cursor:
                             # Insert without status_number column - include all required fields and defaults
-                            cursor.execute("""
-                                INSERT INTO deliveries (
-                                    id, driver_id, order_id, status, address, phone_number,
-                                    delivery_date, description, delivered_weight, reminder_sms_sent,
-                                    customer_confirmation_status, created_at, updated_at
-                                ) VALUES (
-                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-                                )
-                            """, [
-                                delivery_id,
-                                driver.id,
-                                order.id,
-                                delivery_status,
-                                address_text,
-                                phone_number,
-                                delivery_date_val,
-                                validated_data.get('description', ''),
-                                0.0,  # delivered_weight default
-                                False,  # reminder_sms_sent default
-                                'pending',  # customer_confirmation_status default
-                                now,
-                                now
-                            ])
+                            # Check if latitude/longitude columns exist
+                            has_lat_lng = delivery_latitude is not None or delivery_longitude is not None
+                            
+                            if has_lat_lng:
+                                cursor.execute("""
+                                    INSERT INTO deliveries (
+                                        id, driver_id, order_id, status, address, phone_number,
+                                        latitude, longitude,
+                                        delivery_date, description, delivered_weight, reminder_sms_sent,
+                                        customer_confirmation_status, created_at, updated_at
+                                    ) VALUES (
+                                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                    )
+                                """, [
+                                    delivery_id,
+                                    driver.id,
+                                    order.id,
+                                    delivery_status,
+                                    address_text,
+                                    phone_number,
+                                    delivery_latitude,
+                                    delivery_longitude,
+                                    delivery_date_val,
+                                    validated_data.get('description', ''),
+                                    0.0,  # delivered_weight default
+                                    False,  # reminder_sms_sent default
+                                    'pending',  # customer_confirmation_status default
+                                    now,
+                                    now
+                                ])
+                            else:
+                                cursor.execute("""
+                                    INSERT INTO deliveries (
+                                        id, driver_id, order_id, status, address, phone_number,
+                                        delivery_date, description, delivered_weight, reminder_sms_sent,
+                                        customer_confirmation_status, created_at, updated_at
+                                    ) VALUES (
+                                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                                    )
+                                """, [
+                                    delivery_id,
+                                    driver.id,
+                                    order.id,
+                                    delivery_status,
+                                    address_text,
+                                    phone_number,
+                                    delivery_date_val,
+                                    validated_data.get('description', ''),
+                                    0.0,  # delivered_weight default
+                                    False,  # reminder_sms_sent default
+                                    'pending',  # customer_confirmation_status default
+                                    now,
+                                    now
+                                ])
                         
                         # Fetch the created delivery using safe query (without status_number)
                         delivery = _apply_status_number_safe_query(Delivery.objects.filter(id=delivery_id)).get()
@@ -987,11 +1078,17 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                 page_size = 20
             
             # Build query - use safe query to avoid errors if column doesn't exist
+            # Note: select_related must be called before only() to work correctly
             if request.user.is_staff:
-                qs = Delivery.objects.all().select_related('driver', 'order', 'order__user')
+                qs = Delivery.objects.all()
             else:
-                qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
+                qs = Delivery.objects.filter(driver=request.user)
+            
+            # Apply select_related first (before only())
+            qs = qs.select_related('driver', 'order', 'order__user')
+            
             # Apply safe query to exclude status_number if column doesn't exist
+            # This will call only() which should work with select_related
             qs = _apply_status_number_safe_query(qs)
             
             # Filter by userid
@@ -1056,18 +1153,26 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             has_previous_page = current_page > 1
             has_next_page = current_page < total_pages
             
-            # Get paginated items with related data for better performance
+            # Get paginated items - don't call select_related again if already applied
             start = (page_number - 1) * page_size
             end = start + page_size
-            items = qs.select_related('driver', 'order', 'order__user')[start:end]
+            items = qs[start:end]
             
-            # Serialize
-            serializer = DeliverySerializer(items, many=True)
+            # Serialize with error handling
+            try:
+                serializer = DeliverySerializer(items, many=True)
+                serialized_data = serializer.data
+            except Exception as serialization_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error serializing deliveries: {str(serialization_error)}', exc_info=True)
+                # Return empty data if serialization fails
+                serialized_data = []
             
             # Return in old Swagger format with nested pagination
             return create_success_response(
                 data={
-                    'data': serializer.data,
+                    'data': serialized_data,
                     'currentPage': current_page,
                     'totalPages': total_pages,
                     'totalCount': total_count,
@@ -1080,6 +1185,11 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
                 messages=[]
             )
         except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            error_trace = traceback.format_exc()
+            logger.error(f'Error in driverdelivery/search endpoint: {str(e)}\n{error_trace}')
             return create_error_response(
                 error_message=f'An error occurred while searching deliveries: {str(e)}',
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1168,7 +1278,11 @@ class DriverDeliveryMyRequestsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        """Get delivery requests for the currently logged-in driver matching old Swagger format."""
+        """Get delivery requests for the currently logged-in driver matching old Swagger format.
+        Includes:
+        1. Deliveries already assigned to the driver
+        2. Available orders (pending/confirmed without delivery) in driver's zones
+        """
         try:
             # Handle empty request body - request.data is read-only, so use get() or empty dict
             request_data = request.data if request.data else {}
@@ -1191,10 +1305,89 @@ class DriverDeliveryMyRequestsView(APIView):
             if page_size == 0:
                 page_size = 20
             
-            # Get deliveries for current driver - use safe query to avoid errors
-            qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
+            # Get driver's current location from latest LocationUpdate
+            driver_lat = None
+            driver_lng = None
+            if request.user.is_driver:
+                from zistino_apps.deliveries.models import LocationUpdate
+                latest_location = LocationUpdate.objects.filter(
+                    user=request.user
+                ).order_by('-created_at').first()
+                
+                if latest_location:
+                    driver_lat = float(latest_location.latitude)
+                    driver_lng = float(latest_location.longitude)
+            
+            # Get all deliveries (not just assigned to driver) - we'll filter by zone proximity
+            delivery_qs = Delivery.objects.all().select_related('driver', 'order', 'order__user')
             # Apply safe query to exclude status_number if column doesn't exist
-            qs = _apply_status_number_safe_query(qs)
+            delivery_qs = _apply_status_number_safe_query(delivery_qs)
+            
+            # Filter deliveries based on zone proximity to driver's location
+            all_items = []
+            from zistino_apps.users.models import Zone
+            from zistino_apps.deliveries.utils import find_zone_for_location
+            
+            # Get all active zones
+            all_zones = Zone.objects.filter(
+                is_active=True,
+                center_latitude__isnull=False,
+                center_longitude__isnull=False
+            )
+            
+            # Find zones near driver's location (if driver has location)
+            nearby_zones = []
+            if driver_lat and driver_lng:
+                for zone in all_zones:
+                    # Check if driver is within zone radius
+                    if zone.contains_point(driver_lat, driver_lng):
+                        nearby_zones.append(zone.id)
+                    else:
+                        # Also include zones within reasonable distance (e.g., 20km)
+                        distance = zone.calculate_distance_km(driver_lat, driver_lng)
+                        if distance is not None and distance <= 20.0:  # 20km threshold
+                            nearby_zones.append(zone.id)
+            
+            # Filter deliveries that are in nearby zones (or all if driver has no location)
+            for delivery in delivery_qs:
+                delivery_in_nearby_zone = False
+                
+                # If driver has location, check zone proximity
+                if driver_lat and driver_lng and nearby_zones:
+                    # Method 1: If delivery has latitude/longitude, find its zone
+                    if delivery.latitude and delivery.longitude:
+                        delivery_zone = find_zone_for_location(
+                            float(delivery.latitude),
+                            float(delivery.longitude)
+                        )
+                        if delivery_zone and delivery_zone.id in nearby_zones:
+                            delivery_in_nearby_zone = True
+                    
+                    # Method 2: If order has latitude/longitude, use that
+                    if not delivery_in_nearby_zone and delivery.order:
+                        if delivery.order.latitude and delivery.order.longitude:
+                            order_zone = find_zone_for_location(
+                                float(delivery.order.latitude),
+                                float(delivery.order.longitude)
+                            )
+                            if order_zone and order_zone.id in nearby_zones:
+                                delivery_in_nearby_zone = True
+                    
+                    # Method 3: If order has zone_id, check if it's in nearby zones
+                    if not delivery_in_nearby_zone and delivery.order:
+                        if hasattr(delivery.order, 'zone_id') and delivery.order.zone_id:
+                            if delivery.order.zone_id in nearby_zones:
+                                delivery_in_nearby_zone = True
+                else:
+                    # If driver has no location, show all deliveries (for testing/fallback)
+                    # In production, you might want to return empty list or require location
+                    delivery_in_nearby_zone = True
+                
+                if delivery_in_nearby_zone:
+                    all_items.append(delivery)
+            
+            # Now filter the combined list (deliveries + available orders)
+            qs = all_items
             
             # Filter by preOrderId if provided (in advancedSearch or as direct field)
             pre_order_id = None
@@ -1206,77 +1399,78 @@ class DriverDeliveryMyRequestsView(APIView):
             if not pre_order_id and hasattr(request, 'data') and isinstance(request.data, dict):
                 pre_order_id = request.data.get('preOrderId')
             
+            # Filter the list (not queryset) by preOrderId if provided
             if pre_order_id:
-                # Convert preOrderId to UUID and filter by order
                 try:
                     import hashlib
-                    # preOrderId might be an integer hash, so we need to find matching orders
-                    # For now, we'll try to match by order ID hash
-                    # This is a simplified approach - you might need to store preOrderId mapping
-                    matching_orders = []
-                    for order in Order.objects.all():
-                        # Use same hash calculation as OrderCompatibilitySerializer.get_id()
-                        uuid_str = str(order.id)
-                        hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
-                        hash_int = int(hash_obj.hexdigest(), 16)
-                        order_id_int = hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
-                        if str(order_id_int) == str(pre_order_id) or order_id_int == pre_order_id:
-                            matching_orders.append(order.id)
-                    
-                    if matching_orders:
-                        qs = qs.filter(order__id__in=matching_orders)
-                    else:
-                        # If no matching order found, return empty results
-                        return create_success_response(data=[], messages=[])
+                    matching_order_ids = []
+                    for item in qs:
+                        order = item.order if hasattr(item, 'order') else None
+                        if order:
+                            uuid_str = str(order.id)
+                            hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                            hash_int = int(hash_obj.hexdigest(), 16)
+                            order_id_int = hash_int % 2147483647
+                            if str(order_id_int) == str(pre_order_id) or order_id_int == pre_order_id:
+                                matching_order_ids.append(item)
+                    qs = matching_order_ids
                 except Exception:
                     pass  # If preOrderId filtering fails, continue without filter
             
-            # Filter by status
+            # Filter by status (on list)
             if validated_data.get('status') is not None:
-                status_map = {0: 'assigned', 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
+                status_map = {0: ['assigned', 'available'], 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
                 status_value = status_map.get(validated_data['status'])
                 if status_value:
-                    qs = qs.filter(status=status_value)
+                    if isinstance(status_value, list):
+                        qs = [item for item in qs if hasattr(item, 'status') and item.status in status_value]
+                    else:
+                        qs = [item for item in qs if hasattr(item, 'status') and item.status == status_value]
             
-            # Filter by date range
+            # Filter by date range (on list)
             if validated_data.get('fromDate'):
-                qs = qs.filter(created_at__gte=validated_data['fromDate'])
+                from_date = validated_data['fromDate']
+                qs = [item for item in qs if hasattr(item, 'created_at') and item.created_at >= from_date]
             if validated_data.get('toDate'):
-                qs = qs.filter(created_at__lte=validated_data['toDate'])
+                to_date = validated_data['toDate']
+                qs = [item for item in qs if hasattr(item, 'created_at') and item.created_at <= to_date]
             
-            # Apply keyword search
+            # Apply keyword search (on list)
             keyword = validated_data.get('keyword', '').strip()
             if keyword:
-                qs = qs.filter(
-                    Q(address__icontains=keyword) |
-                    Q(phone_number__icontains=keyword) |
-                    Q(description__icontains=keyword)
-                )
+                keyword_lower = keyword.lower()
+                qs = [item for item in qs if (
+                    (hasattr(item, 'address') and keyword_lower in (item.address or '').lower()) or
+                    (hasattr(item, 'phone_number') and keyword_lower in (item.phone_number or '').lower()) or
+                    (hasattr(item, 'description') and keyword_lower in (item.description or '').lower())
+                )]
             
-            # Handle orderBy
+            # Handle orderBy (on list)
             order_by = validated_data.get('orderBy', [])
             if order_by and isinstance(order_by, list):
                 valid_order_by = []
                 for field in order_by:
                     if field and isinstance(field, str):
-                        # Map common fields
-                        mapped_field = None
                         if field.lower() in ['created_at', 'createdat', 'createdon']:
-                            mapped_field = 'created_at'
+                            valid_order_by.append(('created_at', True))
+                        elif field.lower() in ['-created_at', '-createdat', '-createdon']:
+                            valid_order_by.append(('created_at', False))
                         elif field.lower() in ['delivery_date', 'deliverydate']:
-                            mapped_field = 'delivery_date'
-                        elif field.lower() in ['status']:
-                            mapped_field = 'status'
-                        
-                        if mapped_field:
-                            valid_order_by.append(mapped_field)
+                            valid_order_by.append(('delivery_date', True))
+                        elif field.lower() in ['-delivery_date', '-deliverydate']:
+                            valid_order_by.append(('delivery_date', False))
                 
                 if valid_order_by:
-                    qs = qs.order_by(*valid_order_by)
+                    # Sort by first valid field
+                    field_name, ascending = valid_order_by[0]
+                    reverse = not ascending
+                    qs = sorted(qs, key=lambda x: getattr(x, field_name, None) or (datetime.min if ascending else datetime.max), reverse=reverse)
                 else:
-                    qs = qs.order_by('-created_at')
+                    # Default: sort by created_at descending
+                    qs = sorted(qs, key=lambda x: getattr(x, 'created_at', datetime.min), reverse=True)
             else:
-                qs = qs.order_by('-created_at')
+                # Default: sort by created_at descending
+                qs = sorted(qs, key=lambda x: getattr(x, 'created_at', datetime.min), reverse=True)
             
             # Apply pagination if pageSize > 0
             if page_size > 0:
