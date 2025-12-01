@@ -17,6 +17,10 @@ class DriverDeliveryCreateRequestSerializer(serializers.Serializer):
     deliveryDate = serializers.DateTimeField(required=False, allow_null=True, help_text='Delivery date')
     setUserId = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Set User ID (UUID string)')
     addressId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Address ID')
+    address = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Delivery address')
+    phoneNumber = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text='Phone number')
+    latitude = serializers.DecimalField(required=False, allow_null=True, max_digits=9, decimal_places=6, help_text='Latitude')
+    longitude = serializers.DecimalField(required=False, allow_null=True, max_digits=9, decimal_places=6, help_text='Longitude')
     orderId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Order ID (UUID string)')
     examId = serializers.CharField(required=False, allow_blank=True, allow_null=True, default='0', help_text='Exam ID')
     requestId = serializers.IntegerField(required=False, allow_null=True, default=0, help_text='Request ID')
@@ -82,8 +86,8 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
     setUser = serializers.SerializerMethodField()
     addressId = serializers.SerializerMethodField()
     address = serializers.CharField()
-    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
-    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    latitude = serializers.SerializerMethodField()
+    longitude = serializers.SerializerMethodField()
     phoneNumber = serializers.CharField(source='phone_number')
     vatNumber = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
@@ -97,8 +101,20 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
     description = serializers.CharField(allow_blank=True)
     
     def get_id(self, obj):
-        """Return delivery ID as integer hash for compatibility."""
+        """Return delivery ID as integer hash for compatibility.
+        For available orders (not yet assigned), use order ID hash.
+        For existing deliveries, use delivery ID hash.
+        """
         import hashlib
+        # Check if this is an available order (has status 'available')
+        if hasattr(obj, 'status') and obj.status == 'available':
+            # Use order ID hash for available orders
+            if obj.order:
+                uuid_str = str(obj.order.id)
+                hash_obj = hashlib.md5(uuid_str.encode('utf-8'))
+                hash_int = int(hash_obj.hexdigest(), 16)
+                return hash_int % 2147483647  # Max 32-bit integer (matching OrderCompatibilitySerializer)
+        # For existing deliveries, use delivery ID hash
         delivery_id_str = str(obj.id).replace('-', '')
         delivery_id_int = int(hashlib.md5(delivery_id_str.encode()).hexdigest()[:8], 16) % 100000000
         return delivery_id_int
@@ -213,4 +229,58 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
         if obj.driver:
             return obj.driver.phone_number or ""
         return ""
+    
+    def get_latitude(self, obj):
+        """Return latitude from delivery, order, or zone."""
+        # Method 1: Get from delivery if available
+        if obj.latitude:
+            return obj.latitude
+        
+        # Method 2: Get from order if available
+        if obj.order and obj.order.latitude:
+            return obj.order.latitude
+        
+        # Method 3: Get from zone if order has zone_id
+        if obj.order and hasattr(obj.order, 'zone_id') and obj.order.zone_id:
+            try:
+                from zistino_apps.users.models import Zone
+                zone = Zone.objects.get(id=obj.order.zone_id)
+                if zone.center_latitude:
+                    return zone.center_latitude
+            except Zone.DoesNotExist:
+                pass
+        
+        # Method 4: Get from zone based on delivery/order location
+        if obj.latitude or (obj.order and obj.order.latitude):
+            # Already tried above, return None
+            return None
+        
+        return None
+    
+    def get_longitude(self, obj):
+        """Return longitude from delivery, order, or zone."""
+        # Method 1: Get from delivery if available
+        if obj.longitude:
+            return obj.longitude
+        
+        # Method 2: Get from order if available
+        if obj.order and obj.order.longitude:
+            return obj.order.longitude
+        
+        # Method 3: Get from zone if order has zone_id
+        if obj.order and hasattr(obj.order, 'zone_id') and obj.order.zone_id:
+            try:
+                from zistino_apps.users.models import Zone
+                zone = Zone.objects.get(id=obj.order.zone_id)
+                if zone.center_longitude:
+                    return zone.center_longitude
+            except Zone.DoesNotExist:
+                pass
+        
+        # Method 4: Get from zone based on delivery/order location
+        if obj.longitude or (obj.order and obj.order.longitude):
+            # Already tried above, return None
+            return None
+        
+        return None
 
