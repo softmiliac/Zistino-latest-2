@@ -78,30 +78,23 @@ const Users: FC = () => {
     },
   });
 
-  const handleChangeItems = () => {
-    const checkedItems: any = document.querySelectorAll("#user-role-item");
-
-    const checkItemsData = Array.from(checkedItems).map((item: any) => {
-      try {
-        return JSON.parse(item.alt);
-      } catch (e) {
-        return {};
-      }
-    });
-
-    Array.from(checkedItems).map((x: any, index) => {
-      if (x.checked) {
-        checkItemsData[index].enabled = true;
-      } else {
-        checkItemsData[index].enabled = false;
-      }
-    });
-
-    setSelectedRoles(checkItemsData);
+  const handleChangeItems = (selectedRoleName: string) => {
+    // Update roles: only the selected role is enabled, the other is disabled
+    const updatedRoles = selectedRoles.map((role: any) => ({
+      ...role,
+      enabled: role.roleName === selectedRoleName
+    }));
+    setSelectedRoles(updatedRoles);
   };
 
   useEffect(() => {
-    handleChangeItems();
+    // Initialize selectedRoles when uroles data is loaded
+    if (uroles?.data?.userRoles) {
+      const filteredRoles = uroles.data.userRoles.filter(
+        (role: any) => role.roleName === 'driver' || role.roleName === 'customer'
+      );
+      setSelectedRoles(filteredRoles);
+    }
   }, [uroles]);
 
   // if (isLoading) return <div>{t("loading")}</div>;
@@ -155,24 +148,22 @@ const Users: FC = () => {
       },
     },
     { title: t("email"), dataIndex: "email" },
-    // {
-    //   title: t("confirmed"),
-    //   dataIndex: "emailConfirmed",
-    //   align: "center",
-    //   render(value) {
-    //     return value ? (
-    //       <HiCheck
-    //         className="text-xl text-green-500"
-    //         style={{ display: "inline-flex" }}
-    //       />
-    //     ) : (
-    //       <HiX
-    //         className="text-xl text-red-500"
-    //         style={{ display: "inline-flex" }}
-    //       />
-    //     );
-    //   },
-    // },
+    {
+      title: t("نقش"),
+      dataIndex: "isDriver",
+      align: "center",
+      render(value) {
+        return value ? (
+          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm">
+            {t("راننده")}
+          </span>
+        ) : (
+          <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-sm">
+            {t("کاربر")}
+          </span>
+        );
+      },
+    },
     {
       title: t("نقش ها"),
       render(record) {
@@ -341,20 +332,22 @@ const Users: FC = () => {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-5 mb-10">
-              {uroles?.data?.userRoles.map((role: any) => (
-                <div className="form-control">
+              {selectedRoles
+                .filter((role: any) => role.roleName === 'driver' || role.roleName === 'customer')
+                .map((role: any) => (
+                <div className="form-control" key={role.roleId}>
                   <label className="cursor-pointer label">
                     <span className="label-text text-zinc-800 dark:text-white">
-                      {role.roleName}
+                      {role.roleName === 'driver' ? t('راننده') : role.roleName === 'customer' ? t('کاربر') : role.roleName}
                     </span>
                     <input
-                      id="user-role-item"
+                      id={`user-role-item-${role.roleId}`}
                       alt={JSON.stringify(role)}
-                      name={role.roleName}
-                      defaultChecked={role.enabled}
-                      type="checkbox"
-                      onChange={handleChangeItems}
-                      className="checkbox checkbox-primary"
+                      name="user-role"
+                      checked={role.enabled}
+                      type="radio"
+                      onChange={() => handleChangeItems(role.roleName)}
+                      className="radio radio-primary"
                     />
                   </label>
                 </div>
