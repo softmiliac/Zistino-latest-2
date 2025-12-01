@@ -24,7 +24,8 @@ class User(AbstractUser):
     country = models.CharField(max_length=100, default='Iran')
     city = models.CharField(max_length=100, blank=True)
     # Additional driver-specific fields
-    is_driver = models.BooleanField(default=True)
+    # Default is False - users are customers by default, manager must approve them as drivers
+    is_driver = models.BooleanField(default=False, help_text='Whether user is a driver. Must be approved by manager.')
     driver_license_number = models.CharField(max_length=50, blank=True)
     vehicle_type = models.CharField(max_length=100, blank=True)
     vehicle_plate = models.CharField(max_length=20, blank=True)
