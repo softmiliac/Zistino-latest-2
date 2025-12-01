@@ -165,15 +165,30 @@ class IdentityRegisterView(APIView):
                 # Generate a unique phone number if not provided (required field)
                 phone_number = f'+989{str(uuid.uuid4().int)[:9]}'
             
+            # Determine if user is driver based on appType
+            app_type = validated_data.get('appType', 'customer').lower()
+            is_driver = (app_type == 'driver')
+            
+            # Get first_name and last_name, use defaults if empty
+            first_name = validated_data.get('firstName', '').strip()
+            last_name = validated_data.get('lastName', '').strip()
+            
+            # If firstName or lastName is empty, use phoneNumber or userName as fallback
+            if not first_name:
+                first_name = phone_number or validated_data.get('userName', '') or 'کاربر'
+            if not last_name:
+                last_name = phone_number or validated_data.get('userName', '') or ''
+            
             user = User.objects.create_user(
                 username=username,
                 email=validated_data.get('email'),
                 password=validated_data.get('password'),
                 phone_number=phone_number,
-                first_name=validated_data.get('firstName', ''),
-                last_name=validated_data.get('lastName', ''),
+                first_name=first_name,
+                last_name=last_name,
                 is_active=False,  # User needs to verify email/phone
-                email_confirmed=False
+                email_confirmed=False,
+                is_driver=is_driver  # Set based on appType
             )
             
             # Set optional fields that exist in User model
@@ -207,6 +222,15 @@ class IdentityRegisterView(APIView):
                 user.representative_by = validated_data.get('representativeBy')
             
             user.save()
+            
+            # Assign role groups based on appType
+            from django.contrib.auth.models import Group
+            if is_driver:
+                driver_group, _ = Group.objects.get_or_create(name='Driver')
+                user.groups.add(driver_group)
+            else:
+                customer_group, _ = Group.objects.get_or_create(name='Customer')
+                user.groups.add(customer_group)
             
             # Return success response matching old Swagger format
             return create_success_response(
@@ -322,20 +346,35 @@ class IdentityRegisterWithCodeView(APIView):
                     errors={'phoneNumber': ['Phone number is already registered.']}
                 )
             
+            # Determine if user is driver based on appType
+            app_type = validated_data.get('appType', 'customer').lower()
+            is_driver = (app_type == 'driver')
+            
             # Create user (same logic as register)
             username = phone_number if phone_number else validated_data.get('userName')
             if not phone_number:
                 phone_number = f'+989{str(uuid.uuid4().int)[:9]}'
+            
+            # Get first_name and last_name, use defaults if empty
+            first_name = validated_data.get('firstName', '').strip()
+            last_name = validated_data.get('lastName', '').strip()
+            
+            # If firstName or lastName is empty, use phoneNumber or userName as fallback
+            if not first_name:
+                first_name = phone_number or validated_data.get('userName', '') or 'کاربر'
+            if not last_name:
+                last_name = phone_number or validated_data.get('userName', '') or ''
             
             user = User.objects.create_user(
                 username=username,
                 email=validated_data.get('email'),
                 password=validated_data.get('password'),
                 phone_number=phone_number,
-                first_name=validated_data.get('firstName', ''),
-                last_name=validated_data.get('lastName', ''),
+                first_name=first_name,
+                last_name=last_name,
                 is_active=False,
-                email_confirmed=False
+                email_confirmed=False,
+                is_driver=is_driver  # Set based on appType
             )
             
             # Set optional fields
@@ -361,6 +400,15 @@ class IdentityRegisterWithCodeView(APIView):
                 user.representative_by = validated_data.get('representativeBy')
             
             user.save()
+            
+            # Assign role groups based on appType
+            from django.contrib.auth.models import Group
+            if is_driver:
+                driver_group, _ = Group.objects.get_or_create(name='Driver')
+                user.groups.add(driver_group)
+            else:
+                customer_group, _ = Group.objects.get_or_create(name='Customer')
+                user.groups.add(customer_group)
             
             # Return simplified response matching old Swagger format
             return Response({
@@ -512,20 +560,35 @@ class IdentityRegisterWithPhoneCallView(APIView):
                     errors={'userInfo': {'phoneNumber': ['Phone number is already registered.']}}
                 )
             
+            # Determine if user is driver based on appType
+            app_type = validated_data.get('appType', 'customer').lower()
+            is_driver = (app_type == 'driver')
+            
             # Create user
             username = phone_number if phone_number else user_info.get('userName')
             if not phone_number:
                 phone_number = f'+989{str(uuid.uuid4().int)[:9]}'
+            
+            # Get first_name and last_name, use defaults if empty
+            first_name = user_info.get('firstName', '').strip()
+            last_name = user_info.get('lastName', '').strip()
+            
+            # If firstName or lastName is empty, use phoneNumber or userName as fallback
+            if not first_name:
+                first_name = phone_number or user_info.get('userName', '') or 'کاربر'
+            if not last_name:
+                last_name = phone_number or user_info.get('userName', '') or ''
             
             user = User.objects.create_user(
                 username=username,
                 email=user_info.get('email'),
                 password=user_info.get('password'),
                 phone_number=phone_number,
-                first_name=user_info.get('firstName', ''),
-                last_name=user_info.get('lastName', ''),
+                first_name=first_name,
+                last_name=last_name,
                 is_active=False,
-                email_confirmed=False
+                email_confirmed=False,
+                is_driver=is_driver  # Set based on appType
             )
             
             # Set optional fields
@@ -551,6 +614,15 @@ class IdentityRegisterWithPhoneCallView(APIView):
                 user.representative_by = user_info.get('representativeBy')
             
             user.save()
+            
+            # Assign role groups based on appType
+            from django.contrib.auth.models import Group
+            if is_driver:
+                driver_group, _ = Group.objects.get_or_create(name='Driver')
+                user.groups.add(driver_group)
+            else:
+                customer_group, _ = Group.objects.get_or_create(name='Customer')
+                user.groups.add(customer_group)
             
             # TODO: Create address and delivery records if provided
             # For now, we'll just create the user
