@@ -302,13 +302,18 @@ class LoginView(APIView):
             verification_code.is_used = True
             verification_code.save()
             
+            # Determine if user is driver based on appType (from request data or header)
+            app_type = request.data.get('appType', request.META.get('HTTP_X_APP_TYPE', 'customer')).lower()
+            is_driver = (app_type == 'driver')
+            
             # Get or create user
             user, created = User.objects.get_or_create(
                 phone_number=phone_number,
                 defaults={
                     'username': phone_number,
                     'is_active': True,
-                    'email_confirmed': True
+                    'email_confirmed': True,
+                    'is_driver': is_driver  # Set based on appType when creating new user
                 }
             )
             
@@ -316,6 +321,15 @@ class LoginView(APIView):
                 user.is_active = True
                 user.email_confirmed = True
                 user.save()
+                
+                # Assign role groups based on appType
+                from django.contrib.auth.models import Group
+                if is_driver:
+                    driver_group, _ = Group.objects.get_or_create(name='Driver')
+                    user.groups.add(driver_group)
+                else:
+                    customer_group, _ = Group.objects.get_or_create(name='Customer')
+                    user.groups.add(customer_group)
             
             # Generate token (you might want to use JWT here)
             from rest_framework.authtoken.models import Token
@@ -462,6 +476,23 @@ class RegisterView(APIView):
                 is_active=True,
                 email_confirmed=True
             )
+            
+            # Determine if user is driver based on appType
+            app_type = request.data.get('appType', 'customer').lower()
+            is_driver = (app_type == 'driver')
+            
+            # Set is_driver for new user
+            user.is_driver = is_driver
+            user.save(update_fields=['is_driver'])
+            
+            # Assign role groups based on appType
+            from django.contrib.auth.models import Group
+            if is_driver:
+                driver_group, _ = Group.objects.get_or_create(name='Driver')
+                user.groups.add(driver_group)
+            else:
+                customer_group, _ = Group.objects.get_or_create(name='Customer')
+                user.groups.add(customer_group)
             
             # Handle referral code if provided
             referral_code = request.data.get('referral_code', '').strip()
