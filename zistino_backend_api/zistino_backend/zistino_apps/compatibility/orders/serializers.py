@@ -528,9 +528,29 @@ class OrderCompatibilitySerializer(serializers.ModelSerializer):
 
     def get_orderItems(self, obj):
         """Get order items as array matching old Swagger format."""
-        order_items = obj.order_items.all()
-        serializer = OrderItemCompatibilitySerializer(order_items, many=True, context=self.context)
-        return serializer.data
+        try:
+            # Use prefetched order_items if available, otherwise query
+            if hasattr(obj, '_prefetched_objects_cache') and 'order_items' in obj._prefetched_objects_cache:
+                order_items = obj._prefetched_objects_cache['order_items']
+            else:
+                # Try to access order_items relation
+                try:
+                    order_items = obj.order_items.all()
+                except AttributeError:
+                    # If order_items doesn't exist, return empty list
+                    return []
+            
+            if not order_items:
+                return []
+            
+            serializer = OrderItemCompatibilitySerializer(order_items, many=True, context=self.context)
+            return serializer.data
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error in get_orderItems for order {obj.id}: {str(e)}')
+            # Return empty list if there's any error accessing order_items
+            return []
 
     def to_representation(self, instance):
         """Convert to old Swagger format."""
