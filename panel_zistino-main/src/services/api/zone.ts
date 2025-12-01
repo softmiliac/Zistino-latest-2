@@ -9,10 +9,12 @@ const mapZone = {
       keyword,
     }).then((res) => res.data),
   getAll: () => post("/mapzone/search", {}).then((res) => res.data),
-  create: (data: IZone) => post("/mapzone", data),
+  create: (data: IZone) => post("/mapzone/", data),
   createUserZone: (data: { userId: string; zoneId: number; priority?: number }) => post("/mapzone/createuserinzone", data),
   userInZone: (id: string) =>
-    id ? post(`/mapzone/userinzone?userid=${id}`, {}) : {},
+    id ? post(`/mapzone/userinzone?userid=${id}`, {}).then((res) => res.data) : {},
+  searchUserInZone: (zoneId: number) =>
+    zoneId ? post(`/mapzone/searchuserinzone?zoneId=${zoneId}`, {}).then((res) => res.data) : {},
   delete: (id: string) => remove(`/mapzone/${id}`).then((res) => res.data),
   delUserInZone: (id: number) =>
     remove(`/mapzone/userinzone/${id}`).then((res) => res.data),
@@ -32,6 +34,14 @@ export const useZoneAll = () => {
 
 export const useGetUserInZone = (id: string) => {
   return useQuery(["user-in-zone", id], () => mapZone.userInZone(id));
+};
+
+export const useSearchUserInZone = (zoneId: number | null) => {
+  return useQuery(
+    ["search-user-in-zone", zoneId],
+    () => mapZone.searchUserInZone(zoneId!),
+    { enabled: !!zoneId }
+  );
 };
 
 export const useDeleteZone = () => {
