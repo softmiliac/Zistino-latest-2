@@ -21,6 +21,7 @@ class VerifyCodeRequestSerializer(serializers.Serializer):
 class LoginRequestSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=15)
     code = serializers.CharField(max_length=6)
+    appType = serializers.ChoiceField(required=False, choices=['customer', 'driver'], default='customer', help_text='App type: "customer" for customer app, "driver" for driver app. Used when creating new user during login. Defaults to "customer".')
 
 
 class RegisterRequestSerializer(serializers.Serializer):
@@ -30,6 +31,7 @@ class RegisterRequestSerializer(serializers.Serializer):
     last_name = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
     referral_code = serializers.CharField(required=False, allow_blank=True, max_length=20, help_text='Optional referral code')
+    appType = serializers.ChoiceField(required=False, choices=['customer', 'driver'], default='customer', help_text='App type: "customer" for customer app, "driver" for driver app. Defaults to "customer".')
 
 
 class ForgotPasswordRequestSerializer(serializers.Serializer):
