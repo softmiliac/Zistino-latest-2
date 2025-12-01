@@ -36,20 +36,21 @@ const Orders: FC = () => {
   }, [searchValue]);
 
   const orderStatus = [
-    "در حال بررسی",
-    "رد شده",
-    "تایید شده",
-    "ارسال به مرکز",
-    "تحویل داده شد",
+    "در حال بررسی",    // 0: pending
+    "تایید شده",        // 1: confirmed
+    "ارسال به مرکز",    // 2: in_progress
+    "تحویل داده شد",    // 3: completed
+    "رد شده",           // 4: cancelled
   ];
 
   // Map frontend status index to backend status string
+  // Backend mapping: pending=0, confirmed=1, in_progress=2, completed=3, cancelled=4
   const statusMap: { [key: number]: string } = {
     0: "pending",      // "در حال بررسی"
-    1: "cancelled",    // "رد شده"
-    2: "confirmed",    // "تایید شده"
-    3: "in_progress",  // "ارسال به مرکز"
-    4: "completed",    // "تحویل داده شد"
+    1: "confirmed",    // "تایید شده"
+    2: "in_progress",  // "ارسال به مرکز"
+    3: "completed",    // "تحویل داده شد"
+    4: "cancelled",    // "رد شده"
   };
 
   const orderListStyle = {
@@ -142,10 +143,10 @@ const Orders: FC = () => {
                   defaultValue={JSON.stringify(record.status)}
                 >
                   <option value="0">در حال بررسی</option>
-                  <option value="1">رد شده</option>
-                  <option value="2">تایید شده</option>
-                  <option value="3">ارسال به مرکز</option>
-                  <option value="4">تحویل داده شد</option>
+                  <option value="1">تایید شده</option>
+                  <option value="2">ارسال به مرکز</option>
+                  <option value="3">تحویل داده شد</option>
+                  <option value="4">رد شده</option>
                 </SingleSelect>
               </div>
             </div>
@@ -224,10 +225,10 @@ const Orders: FC = () => {
                     defaultValue={JSON.stringify(order.status)}
                   >
                     <option value="0">در حال بررسی</option>
-                    <option value="1">رد شده</option>
-                    <option value="2">تایید شده</option>
-                    <option value="3">ارسال به مرکز</option>
-                    <option value="4">تحویل داده شد</option>
+                    <option value="1">تایید شده</option>
+                    <option value="2">ارسال به مرکز</option>
+                    <option value="3">تحویل داده شد</option>
+                    <option value="4">رد شده</option>
                   </SingleSelect>
                 </div>
               </div>
