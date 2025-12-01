@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiExample
 from django.db.models import Q
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 from datetime import timedelta
 from zistino_apps.orders.models import Order
 
@@ -1697,7 +1698,19 @@ class ManagerDeliveryViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Return all deliveries (no filtering by driver)."""
-        return Delivery.objects.all().select_related('driver', 'order').order_by('-created_at')
+        qs = Delivery.objects.all().select_related('driver', 'order').order_by('-created_at')
+        # Apply safe query to exclude status_number if column doesn't exist
+        qs = _apply_status_number_safe_query(qs)
+        return qs
+    
+    def get_object(self):
+        """Override to use get_queryset() which applies safe query."""
+        queryset = self.get_queryset()
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
+        obj = get_object_or_404(queryset, **filter_kwargs)
+        self.check_object_permissions(self.request, obj)
+        return obj
     
     def perform_create(self, serializer):
         """Create delivery - manager can assign to any driver."""
@@ -1929,7 +1942,34 @@ class ManagerDeliveryViewSet(viewsets.ModelViewSet):
         """Calculate per-delivery price based on category rates configuration."""
         from decimal import Decimal
         import json
-        delivery = self.get_object()
+        import logging
+        import traceback
+        
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Log the pk value to debug
+            logger.info(f"Calculating price for delivery ID: {pk}, type: {type(pk)}")
+            delivery = self.get_object()
+            logger.info(f"Found delivery: {delivery.id}")
+        except Exception as e:
+            logger.error(f"Error getting delivery {pk}: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Try to find delivery by ID to provide better error message
+            try:
+                from zistino_apps.deliveries.models import Delivery
+                delivery_exists = Delivery.objects.filter(id=pk).exists()
+                if not delivery_exists:
+                    return Response(
+                        {'error': f'Delivery with ID {pk} not found. Please check the delivery ID.'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            except Exception:
+                pass
+            return Response(
+                {'error': f'Error retrieving delivery: {str(e)}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         # Load category rates from configuration
         currency = 'Rials'
@@ -1951,8 +1991,8 @@ class ManagerDeliveryViewSet(viewsets.ModelViewSet):
                             category_rates[cid] = rate
                         if val.get('currency'):
                             currency = str(val.get('currency'))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Error parsing single category rate: {str(e)}")
                 elif isinstance(val, list):
                     # List of category rates
                     for e in val:
@@ -1963,7 +2003,8 @@ class ManagerDeliveryViewSet(viewsets.ModelViewSet):
                                 category_rates[cid] = rate
                             if e.get('currency'):
                                 currency = str(e.get('currency'))
-                        except Exception:
+                        except Exception as e:
+                            logger.warning(f"Error parsing category rate item: {str(e)}")
                             continue
             # Global fallback
             glob_cfg = Configuration.objects.filter(name__icontains='waste_price_per_kg', is_active=True).first()
@@ -1977,52 +2018,71 @@ class ManagerDeliveryViewSet(viewsets.ModelViewSet):
                 elif isinstance(g, (int, float, str)):
                     try:
                         global_rate = Decimal(str(g))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        logger.warning(f"Error parsing global rate: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error loading configuration: {str(e)}")
+            logger.error(traceback.format_exc())
 
         # Build breakdown using DeliveryItems if available
-        from zistino_apps.deliveries.models import DeliveryItem
-        items = DeliveryItem.objects.filter(delivery=delivery).select_related('category')
-        breakdown = []
-        total_weight = Decimal('0.00')
-        total_amount = Decimal('0.00')
-        rate_source = 'category_rates_per_kg'
-        if items.exists() and category_rates:
-            for it in items:
-                w = Decimal(str(it.weight or 0))
-                total_weight += w
-                cid = str(it.category.id)
-                rate = category_rates.get(cid, None)
-                if rate is None:
-                    # if category rate missing, fall back to global
-                    rate = global_rate
-                    rate_source = 'mixed_with_global'
-                amount = (w * (rate or Decimal('0'))).quantize(Decimal('0.01'))
-                total_amount += amount
-                breakdown.append({
-                    'categoryId': cid,
-                    'categoryName': it.category.name,
-                    'weight': f"{w:.2f}",
-                    'rate': f"{(rate or Decimal('0')):.2f}",
-                    'amount': f"{amount:.2f}"
-                })
-        else:
-            # Fallback: use delivered_weight and global rate
-            total_weight = Decimal(str(delivery.delivered_weight or 0))
-            total_amount = (total_weight * (global_rate or Decimal('0'))).quantize(Decimal('0.01'))
+        try:
+            from zistino_apps.deliveries.models import DeliveryItem
+            items = DeliveryItem.objects.filter(delivery=delivery).select_related('category')
             breakdown = []
-            rate_source = 'waste_price_per_kg'
+            total_weight = Decimal('0.00')
+            total_amount = Decimal('0.00')
+            rate_source = 'category_rates_per_kg'
+            
+            if items.exists() and category_rates:
+                for it in items:
+                    try:
+                        if not it.category:
+                            logger.warning(f"DeliveryItem {it.id} has no category, skipping")
+                            continue
+                        
+                        w = Decimal(str(it.weight or 0))
+                        total_weight += w
+                        cid = str(it.category.id)
+                        rate = category_rates.get(cid, None)
+                        if rate is None:
+                            # if category rate missing, fall back to global
+                            rate = global_rate
+                            rate_source = 'mixed_with_global'
+                        amount = (w * (rate or Decimal('0'))).quantize(Decimal('0.01'))
+                        total_amount += amount
+                        breakdown.append({
+                            'categoryId': cid,
+                            'categoryName': it.category.name or 'Unknown',
+                            'weight': f"{w:.2f}",
+                            'rate': f"{(rate or Decimal('0')):.2f}",
+                            'amount': f"{amount:.2f}"
+                        })
+                    except Exception as e:
+                        logger.error(f"Error processing delivery item {it.id}: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        continue
+            else:
+                # Fallback: use delivered_weight and global rate
+                total_weight = Decimal(str(delivery.delivered_weight or 0))
+                total_amount = (total_weight * (global_rate or Decimal('0'))).quantize(Decimal('0.01'))
+                breakdown = []
+                rate_source = 'waste_price_per_kg'
 
-        return Response({
-            'deliveryId': str(delivery.id),
-            'currency': currency,
-            'breakdown': breakdown,
-            'totalWeight': f"{total_weight:.2f}",
-            'totalAmount': f"{total_amount:.2f}",
-            'rateSource': rate_source
-        })
+            return Response({
+                'deliveryId': str(delivery.id),
+                'currency': currency,
+                'breakdown': breakdown,
+                'totalWeight': f"{total_weight:.2f}",
+                'totalAmount': f"{total_amount:.2f}",
+                'rateSource': rate_source
+            })
+        except Exception as e:
+            logger.error(f"Error calculating delivery price: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {'error': f'Error calculating price: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 # ============================================
@@ -2125,7 +2185,7 @@ class ManagerDisapprovalsView(APIView):
         # Apply safe query to exclude status_number if column doesn't exist
         customer_denials = _apply_status_number_safe_query(customer_denials)
         driver_non_deliveries = _apply_status_number_safe_query(driver_non_deliveries)
-        
+
         # Combine based on type filter
         items = []
         if disapproval_type in ['all', 'customer_denial']:
