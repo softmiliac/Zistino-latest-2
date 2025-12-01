@@ -51,13 +51,13 @@ class TripViewSet(viewsets.ViewSet):
 
     def get_permissions(self):
         """
-        Allow all authenticated users (drivers, customers) to read, create, and update trips.
+        Allow all authenticated users (drivers, customers) to read, create, update, and search trips.
         Only managers can delete trips.
         """
         if self.action in ['destroy']:
             # Delete operations: require manager permission
             return [IsAuthenticated(), IsManager()]
-        # Read, create, and update operations: allow all authenticated users
+        # Read, create, update, and search operations: allow all authenticated users
         return [IsAuthenticated()]
 
     @extend_schema(
@@ -413,35 +413,82 @@ class TripViewSet(viewsets.ViewSet):
             # Filter by userId if provided
             user_id = validated_data.get('userId')
             if user_id:
-                try:
-                    user = User.objects.get(id=user_id)
-                    qs = qs.filter(user=user)
-                except User.DoesNotExist:
-                    return create_error_response(
-                        error_message=f'User with ID "{user_id}" not found.',
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        errors={'userId': [f'User with ID "{user_id}" not found.']}
-                    )
+                # Strip whitespace and handle empty strings
+                user_id = str(user_id).strip()
+                if user_id:
+                    try:
+                        # Try to parse as UUID
+                        user_uuid = uuid.UUID(user_id)
+                        user = User.objects.get(id=user_uuid)
+                        qs = qs.filter(user=user)
+                    except (ValueError, TypeError):
+                        # If not a valid UUID, return error
+                        return create_error_response(
+                            error_message=f'Invalid user ID format: "{user_id}". Expected UUID.',
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            errors={'userId': [f'Invalid user ID format. Expected UUID.']}
+                        )
+                    except User.DoesNotExist:
+                        return create_error_response(
+                            error_message=f'User with ID "{user_id}" not found.',
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            errors={'userId': [f'User with ID "{user_id}" not found.']}
+                        )
             
-            # Apply keyword search (not much to search on trips, but we can search by ID)
-            keyword = validated_data.get('keyword', '')
+            # Apply keyword search
+            keyword = validated_data.get('keyword', '').strip()
             if keyword:
+                # Try to search by trip ID (integer)
                 try:
                     keyword_int = int(keyword)
                     qs = qs.filter(id=keyword_int)
                 except ValueError:
-                    # If keyword is not a number, skip search
-                    pass
+                    # If keyword is not a number, try to search by user ID (UUID)
+                    try:
+                        user_uuid = uuid.UUID(keyword)
+                        qs = qs.filter(user_id=user_uuid)
+                    except (ValueError, TypeError):
+                        # If keyword is not a valid UUID either, skip search
+                        pass
             
             # Apply advanced search if provided
             advanced_search = validated_data.get('advancedSearch')
-            if advanced_search and advanced_search.get('keyword'):
-                adv_keyword = advanced_search['keyword']
-                try:
-                    adv_keyword_int = int(adv_keyword)
-                    qs = qs.filter(id=adv_keyword_int)
-                except ValueError:
-                    pass
+            if advanced_search:
+                adv_keyword = advanced_search.get('keyword', '').strip()
+                adv_fields = advanced_search.get('fields', [])
+                
+                if adv_keyword:
+                    # Try to search by trip ID (integer)
+                    try:
+                        adv_keyword_int = int(adv_keyword)
+                        qs = qs.filter(id=adv_keyword_int)
+                    except ValueError:
+                        # If keyword is not a number, try to search by user ID (UUID)
+                        try:
+                            user_uuid = uuid.UUID(adv_keyword)
+                            qs = qs.filter(user_id=user_uuid)
+                        except (ValueError, TypeError):
+                            # If keyword is not a valid UUID either, skip search
+                            pass
+                
+                # Process fields if provided
+                if adv_fields:
+                    for field in adv_fields:
+                        field = field.strip()
+                        if not field:
+                            continue
+                        
+                        # Map field names (case-insensitive)
+                        field_lower = field.lower()
+                        if field_lower in ['userid', 'user_id']:
+                            # If keyword is provided and it's a UUID, filter by user_id
+                            if adv_keyword:
+                                try:
+                                    user_uuid = uuid.UUID(adv_keyword)
+                                    qs = qs.filter(user_id=user_uuid)
+                                except (ValueError, TypeError):
+                                    pass
+                        # Add more field mappings as needed
             
             # Apply ordering
             order_by = validated_data.get('orderBy', [])
