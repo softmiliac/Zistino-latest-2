@@ -1,452 +1,402 @@
 """
-Compatibility views for Localizations endpoints.
-All endpoints will appear under "Localizations" folder in Swagger UI.
-
-Based on Flutter Swagger: https://recycle.metadatads.com/swagger/index.html#/Localizations
+Views for Locations compatibility layer.
+Provides all endpoints matching Flutter app expectations.
 """
-from rest_framework import viewsets, status, serializers
+from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
-from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse, OpenApiParameter
-from drf_spectacular.types import OpenApiTypes
-from django.db.models import Q, Count
-from zistino_apps.users.permissions import IsManager
-
-from zistino_apps.compatibility.utils import create_success_response, create_error_response
-# Import directly from configurations to avoid circular import issues
-from zistino_apps.configurations.models import Localization
-from .serializers import (
-    LocalizationSerializer,
-    LocalizationCreateSerializer,
-    LocalizationSearchRequestSerializer,
-    ResourceSetSerializer,
-    LocalizationByResourceSetSerializer,
-    LocalizationDetailSerializer
-)
+from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from django.contrib.auth import get_user_model
 import uuid
-import hashlib
-from django.http import Http404
+
+from zistino_apps.users.permissions import IsManager
+from zistino_apps.compatibility.utils import create_success_response, create_error_response
+from zistino_apps.deliveries.models import Delivery, Trip
+from .models import LocationUpdate
+from .serializers import (
+    LocationCreateUpdateRequestSerializer,
+    LocationSearchRequestSerializer,
+)
+
+User = get_user_model()
 
 
-@extend_schema(tags=['Localizations'])
-class LocalizationViewSet(viewsets.ModelViewSet):
+def location_to_old_swagger_format(location):
+    """Convert LocationUpdate model instance to old Swagger response format."""
+    return {
+        'id': location.id,
+        'userId': str(location.user.id) if location.user else None,
+        'tripId': location.trip.id if location.trip else 0,
+        'latitude': float(location.latitude) if location.latitude else 0,
+        'longitude': float(location.longitude) if location.longitude else 0,
+        'speed': location.speed or 0,
+        'heading': location.heading or None,
+        'altitude': float(location.altitude) if location.altitude else 0,
+        'satellites': location.satellites or 0,
+        'hdop': location.hdop or 0,
+        'gsmSignal': location.gsm_signal or 0,
+        'odometer': location.odometer or 0,
+        'createdOn': location.created_at.isoformat() if location.created_at else None
+    }
+
+
+@extend_schema(tags=['Locations'])
+class LocationsViewSet(viewsets.ViewSet):
     """
-    ViewSet for managing localizations.
-    All endpoints will appear under "Localizations" folder in Swagger UI.
+    ViewSet for Locations endpoints.
+    All endpoints will appear under "Locations" folder in Swagger UI.
     """
-    queryset = Localization.objects.all()
-    serializer_class = LocalizationSerializer
     permission_classes = [IsAuthenticated]
-    lookup_field = 'pk'
-    lookup_value_regex = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9]+'  # Accept UUID or integer
-
-    def get_queryset(self):
-        """Return all localizations."""
-        return Localization.objects.all().order_by('resource_set', 'key', 'locale')
 
     def get_permissions(self):
-        """Admin-only for create/update/delete/search, AllowAny for read."""
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'search']:
+        """
+        Allow all authenticated users (drivers, customers) to read, create, and update locations.
+        Only managers can delete locations.
+        """
+        if self.action in ['destroy']:
+            # Delete operations: require manager permission
             return [IsAuthenticated(), IsManager()]
-        return [AllowAny()]
+        # Read, create, and update operations: allow all authenticated users
+        return [IsAuthenticated()]
 
-    def get_serializer_class(self):
-        """Use different serializer for create and retrieve."""
-        if self.action == 'create':
-            return LocalizationCreateSerializer
-        if self.action in ['retrieve', 'update', 'partial_update']:
-            return LocalizationDetailSerializer
-        return LocalizationSerializer
-    
-    def get_object_by_id(self, id_value):
-        """Helper method to get object by ID (UUID or integer)."""
-        # Try to parse as UUID first
-        try:
-            lookup_uuid = uuid.UUID(str(id_value))
-            return Localization.objects.get(pk=lookup_uuid)
-        except (ValueError, TypeError):
-            # If not UUID, try as integer (hash-based lookup)
-            try:
-                lookup_int = int(id_value)
-                # Find localization by converting UUIDs to integers and matching
-                for loc in Localization.objects.all():
-                    loc_id_hash = int(hashlib.md5(str(loc.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
-                    if loc_id_hash == lookup_int:
-                        return loc
-                raise Http404('No Localization matches the given query.')
-            except (ValueError, TypeError):
-                raise Http404('Invalid ID format.')
-    
-    def get_object(self):
-        """Override to support both UUID and integer IDs."""
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs[lookup_url_kwarg]
-        return self.get_object_by_id(lookup_value)
-    
     @extend_schema(
-        tags=['Localizations'],
-        operation_id='localizations_retrieve',
-        summary='Retrieve a localization by ID',
-        description='Retrieve a localization by its ID matching old Swagger format. Accepts both UUID and integer IDs.',
-        parameters=[
-            OpenApiParameter(
-                name='id',
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.PATH,
-                required=True,
-                description='Localization ID (UUID or integer)'
+        tags=['Locations'],
+        operation_id='locations_create',
+        summary='Create a location',
+        description='Create a new location matching old Swagger format.',
+        request=LocationCreateUpdateRequestSerializer,
+        examples=[
+            OpenApiExample(
+                'Create location',
+                value={
+                    'userId': 'string',
+                    'tripId': 0,
+                    'latitude': 0,
+                    'longitude': 0,
+                    'speed': 0,
+                    'heading': 'string',
+                    'altitude': 0,
+                    'satellites': 0,
+                    'hdop': 0,
+                    'gsmSignal': 0,
+                    'odometer': 0
+                },
+                request_only=True
             )
         ],
         responses={
             200: OpenApiResponse(
-                response=serializers.Serializer,
-                description='Localization details',
+                response=dict,
+                description='Location created successfully',
                 examples=[
                     OpenApiExample(
-                        'Success response',
+                        'Success Response',
                         value={
-                            'data': {
-                                'id': 1,
-                                'resourceSet': 'string',
-                                'locale': 'string',
-                                'key': 'asd',
-                                'text': 'string'
-                            },
-                            'messages': [],
-                            'succeeded': True
+                            "data": 10101,
+                            "messages": [],
+                            "succeeded": True
                         }
                     )
                 ]
-            ),
-            404: {'description': 'Localization not found'}
+            )
         }
     )
-    def retrieve(self, request, *args, **kwargs):
-        """Retrieve a localization by ID matching old Swagger format."""
+    def create(self, request):
+        """Create a new location matching old Swagger format."""
         try:
-            instance = self.get_object()
-            serializer = LocalizationDetailSerializer(instance)
-            
-            # Convert UUID to integer for response
-            localization_id_hash = int(hashlib.md5(str(instance.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
-            data = serializer.data
-            data['id'] = localization_id_hash
-            
-            return create_success_response(data=data, messages=[])
-        except Exception as e:
-            error_detail = str(e)
-            error_type = type(e).__name__
-            
-            if 'No Localization matches' in error_detail or 'Http404' in error_type:
-                return create_error_response(
-                    error_message=f'Localization with ID "{self.kwargs.get(self.lookup_field)}" not found.',
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    errors={'id': [f'Localization with ID "{self.kwargs.get(self.lookup_field)}" not found.']}
-                )
-            
-            return create_error_response(
-                error_message=f'An error occurred while processing the request: {error_detail}',
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={'error': [f'{error_type}: {error_detail}']}
-            )
-    
-    @extend_schema(
-        tags=['Localizations'],
-        operation_id='localizations_update',
-        summary='Update a localization by ID',
-        description='Update a localization by its ID matching old Swagger format. Accepts both UUID and integer IDs.',
-        parameters=[
-            OpenApiParameter(
-                name='id',
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.PATH,
-                required=True,
-                description='Localization ID (UUID or integer)'
-            )
-        ],
-        request=LocalizationCreateSerializer,
-        responses={
-            200: OpenApiResponse(
-                response=serializers.Serializer,
-                description='Localization updated',
-                examples=[
-                    OpenApiExample(
-                        'Success response',
-                        value={
-                            'data': {
-                                'id': 1,
-                                'resourceSet': 'string',
-                                'locale': 'string',
-                                'key': 'asd',
-                                'text': 'string'
-                            },
-                            'messages': [],
-                            'succeeded': True
-                        }
-                    )
-                ]
-            ),
-            400: {'description': 'Validation error'},
-            404: {'description': 'Localization not found'}
-        }
-    )
-    def update(self, request, *args, **kwargs):
-        """Update a localization by ID matching old Swagger format."""
-        try:
-            instance = self.get_object()
-            
-            # Validate input
-            serializer = LocalizationCreateSerializer(data=request.data)
+            serializer = LocationCreateUpdateRequestSerializer(data=request.data)
             if not serializer.is_valid():
-                errors = {}
-                for field, error_list in serializer.errors.items():
-                    errors[field] = [str(error) for error in error_list]
                 return create_error_response(
-                    error_message='Validation failed',
+                    error_message='Validation error',
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    errors=errors
+                    errors=serializer.errors
                 )
             
             validated_data = serializer.validated_data
             
-            # Update instance
-            instance.resource_set = validated_data['resourceSet']
-            instance.locale = validated_data['locale']
-            instance.key = validated_data['key']
-            instance.value = validated_data['text']  # Map 'text' to 'value'
-            instance.save()
-            
-            # Return updated data
-            response_serializer = LocalizationDetailSerializer(instance)
-            localization_id_hash = int(hashlib.md5(str(instance.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
-            data = response_serializer.data
-            data['id'] = localization_id_hash
-            
-            return create_success_response(data=data, messages=[])
-        except Exception as e:
-            error_detail = str(e)
-            error_type = type(e).__name__
-            
-            if 'No Localization matches' in error_detail or 'Http404' in error_type:
-                return create_error_response(
-                    error_message=f'Localization with ID "{self.kwargs.get(self.lookup_field)}" not found.',
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    errors={'id': [f'Localization with ID "{self.kwargs.get(self.lookup_field)}" not found.']}
-                )
-            
-            return create_error_response(
-                error_message=f'An error occurred while processing the request: {error_detail}',
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={'error': [f'{error_type}: {error_detail}']}
-            )
-    
-    @extend_schema(
-        tags=['Localizations'],
-        operation_id='localizations_destroy',
-        summary='Delete a localization by ID',
-        description='Delete a localization by its ID matching old Swagger format. Accepts both UUID and integer IDs.',
-        parameters=[
-            OpenApiParameter(
-                name='id',
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.PATH,
-                required=True,
-                description='Localization ID (UUID or integer)'
-            )
-        ],
-        responses={
-            200: OpenApiResponse(
-                response=serializers.Serializer,
-                description='Localization deleted',
-                examples=[
-                    OpenApiExample(
-                        'Success response',
-                        value={
-                            'data': {
-                                'id': 1,
-                                'resourceSet': 'string',
-                                'locale': 'string',
-                                'key': 'asd',
-                                'text': 'string'
-                            },
-                            'messages': [],
-                            'succeeded': True
-                        }
+            # Get user (use current user if userId not provided)
+            user_id = validated_data.get('userId')
+            if not user_id:
+                # Default to current user if userId not provided
+                user = request.user
+            else:
+                try:
+                    user = User.objects.get(id=user_id)
+                except User.DoesNotExist:
+                    return create_error_response(
+                        error_message=f'User with ID "{user_id}" not found.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'userId': [f'User with ID "{user_id}" not found.']}
                     )
-                ]
-            ),
-            404: {'description': 'Localization not found'}
-        }
-    )
-    def destroy(self, request, *args, **kwargs):
-        """Delete a localization by ID matching old Swagger format."""
-        try:
-            instance = self.get_object()
             
-            # Get data before deletion
-            response_serializer = LocalizationDetailSerializer(instance)
-            localization_id_hash = int(hashlib.md5(str(instance.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
-            data = response_serializer.data
-            data['id'] = localization_id_hash
-            
-            # Delete instance
-            instance.delete()
-            
-            return create_success_response(data=data, messages=[])
-        except Exception as e:
-            error_detail = str(e)
-            error_type = type(e).__name__
-            
-            if 'No Localization matches' in error_detail or 'Http404' in error_type:
-                return create_error_response(
-                    error_message=f'Localization with ID "{self.kwargs.get(self.lookup_field)}" not found.',
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    errors={'id': [f'Localization with ID "{self.kwargs.get(self.lookup_field)}" not found.']}
-                )
-            
-            return create_error_response(
-                error_message=f'An error occurred while processing the request: {error_detail}',
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={'error': [f'{error_type}: {error_detail}']}
-            )
-    
-    @extend_schema(
-        tags=['Localizations'],
-        operation_id='localizations_create',
-        summary='Create a new localization',
-        description='Create a new localization matching old Swagger format.',
-        request=LocalizationCreateSerializer,
-        examples=[
-            OpenApiExample(
-                'Create localization',
-                value={
-                    'resourceSet': 'string',
-                    'locale': 'string',
-                    'key': 'string',
-                    'text': 'string'
-                }
-            )
-        ],
-        responses={
-            200: OpenApiResponse(
-                response=serializers.Serializer,
-                description='Localization created successfully',
-                examples=[
-                    OpenApiExample(
-                        'Success response',
-                        value={
-                            'data': 1,
-                            'messages': [],
-                            'succeeded': True
-                        }
-                    )
-                ]
-            ),
-            400: {'description': 'Validation error'}
-        }
-    )
-    def create(self, request, *args, **kwargs):
-        """Create a new localization matching old Swagger format."""
-        try:
-            # Handle empty request body - request.data is read-only, so use get() or empty dict
-            request_data = request.data if request.data else {}
-            
-            # Validate input using old Swagger format serializer
-            serializer = LocalizationCreateSerializer(data=request_data)
-            if not serializer.is_valid():
-                errors = {}
-                for field, error_list in serializer.errors.items():
-                    errors[field] = [str(error) for error in error_list]
-                return create_error_response(
-                    error_message='Validation failed',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    errors=errors
-                )
-            
-            # Create localization
-            localization = serializer.save()
-            
-            # Convert UUID to integer for response (using hash for consistent mapping)
-            import hashlib
-            localization_id_hash = int(hashlib.md5(str(localization.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
-            
-            # Return response matching old Swagger format
-            return create_success_response(data=localization_id_hash, messages=[], status_code=status.HTTP_200_OK)
-        
-        except Exception as e:
-            # Catch any unexpected errors and return proper JSON response
-            error_detail = str(e)
-            error_type = type(e).__name__
-            
-            return create_error_response(
-                error_message=f'An error occurred while processing the request: {error_detail}',
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={'error': [f'{error_type}: {error_detail}']}
-            )
-
-    @extend_schema(
-        tags=['Localizations'],
-        operation_id='localizations_dapper',
-        summary='Get localizations (dapper context)',
-        description='Get localizations in dapper context matching old Swagger format. Accepts optional id query parameter.',
-        parameters=[
-            OpenApiParameter(
-                name='id',
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                required=False,
-                description='Localization ID (UUID or integer)'
-            )
-        ],
-        responses={
-            200: OpenApiResponse(
-                response=serializers.Serializer,
-                description='Dapper context',
-                examples=[
-                    OpenApiExample(
-                        'Success response',
-                        value={
-                            'data': None,
-                            'messages': [],
-                            'succeeded': True
-                        }
-                    )
-                ]
-            )
-        }
-    )
-    @action(detail=False, methods=['get'], url_path='dapper')
-    def dapper(self, request):
-        """Get localizations in dapper context matching old Swagger format."""
-        # Check if id parameter is provided
-        id_param = request.query_params.get('id')
-        if id_param:
+            # Get trip
+            trip_id = validated_data.get('tripId')
             try:
-                # Try to get the localization
-                instance = self.get_object_by_id(id_param)
-                serializer = LocalizationDetailSerializer(instance)
-                localization_id_hash = int(hashlib.md5(str(instance.id).encode()).hexdigest()[:8], 16) % (10 ** 9)
-                data = serializer.data
-                data['id'] = localization_id_hash
-                return create_success_response(data=data, messages=[])
-            except (Http404, Localization.DoesNotExist):
-                # If not found, return null
-                return create_success_response(data=None, messages=[])
-        
-        # Old Swagger returns null for dapper when no ID
-        return create_success_response(data=None, messages=[])
+                trip = Trip.objects.get(id=trip_id)
+            except Trip.DoesNotExist:
+                return create_error_response(
+                    error_message=f'Trip with ID "{trip_id}" not found.',
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    errors={'tripId': [f'Trip with ID "{trip_id}" not found.']}
+                )
+            
+            # Create location
+            location = LocationUpdate.objects.create(
+                user=user,
+                trip=trip,
+                latitude=validated_data.get('latitude'),
+                longitude=validated_data.get('longitude'),
+                speed=validated_data.get('speed', 0),
+                heading=validated_data.get('heading', ''),
+                altitude=validated_data.get('altitude', 0),
+                satellites=validated_data.get('satellites', 0),
+                hdop=validated_data.get('hdop', 0),
+                gsm_signal=validated_data.get('gsmSignal', 0),
+                odometer=validated_data.get('odometer', 0)
+            )
+            
+            return create_success_response(data=location.id, messages=[])
+        except Exception as e:
+            return create_error_response(
+                error_message=f'An error occurred while creating location: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'error': [str(e)]}
+            )
 
     @extend_schema(
-        tags=['Localizations'],
-        operation_id='localizations_search',
-        summary='Search Localization using available Filters',
-        description='Search Localization using available Filters matching old Swagger format.',
-        request=LocalizationSearchRequestSerializer,
+        tags=['Locations'],
+        operation_id='locations_retrieve',
+        summary='Retrieve a location by ID',
+        description='Get a location by its ID matching old Swagger format.',
+        responses={
+            200: OpenApiResponse(
+                response=dict,
+                description='Location details',
+                examples=[
+                    OpenApiExample(
+                        'Success Response',
+                        value={
+                            "data": {
+                                "id": 1,
+                                "userId": "85edc2ba-81db-4648-b008-816aa2ad1dd2",
+                                "tripId": 2,
+                                "latitude": 36.312794,
+                                "longitude": 59.590782,
+                                "speed": 0,
+                                "heading": "110.00298309326172",
+                                "altitude": 995.7,
+                                "satellites": 0,
+                                "hdop": 0,
+                                "gsmSignal": 0,
+                                "odometer": 0,
+                                "createdOn": "2024-03-13T07:23:45.2071278"
+                            },
+                            "messages": [],
+                            "succeeded": True
+                        }
+                    )
+                ]
+            )
+        }
+    )
+    def retrieve(self, request, pk=None):
+        """Retrieve a location by ID matching old Swagger format."""
+        try:
+            try:
+                location = LocationUpdate.objects.get(id=pk)
+            except (ValueError, LocationUpdate.DoesNotExist):
+                return create_error_response(
+                    error_message=f'Location with ID "{pk}" not found.',
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    errors={'id': [f'Location with ID "{pk}" not found.']}
+                )
+            
+            location_data = location_to_old_swagger_format(location)
+            return create_success_response(data=location_data, messages=[])
+        except Exception as e:
+            return create_error_response(
+                error_message=f'An error occurred while retrieving location: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'error': [str(e)]}
+            )
+
+    @extend_schema(
+        tags=['Locations'],
+        operation_id='locations_update',
+        summary='Update a location',
+        description='Update an existing location matching old Swagger format.',
+        request=LocationCreateUpdateRequestSerializer,
         examples=[
             OpenApiExample(
-                'Search localizations',
+                'Update location',
+                value={
+                    'userId': 'string',
+                    'tripId': 0,
+                    'latitude': 0,
+                    'longitude': 0,
+                    'speed': 0,
+                    'heading': 'string',
+                    'altitude': 0,
+                    'satellites': 0,
+                    'hdop': 0,
+                    'gsmSignal': 0,
+                    'odometer': 0
+                },
+                request_only=True
+            )
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=dict,
+                description='Location updated successfully',
+                examples=[
+                    OpenApiExample(
+                        'Success Response',
+                        value={
+                            "data": 1,
+                            "messages": [],
+                            "succeeded": True
+                        }
+                    )
+                ]
+            )
+        }
+    )
+    def update(self, request, pk=None):
+        """Update a location matching old Swagger format."""
+        try:
+            serializer = LocationCreateUpdateRequestSerializer(data=request.data)
+            if not serializer.is_valid():
+                return create_error_response(
+                    error_message='Validation error',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    errors=serializer.errors
+                )
+            
+            # Get location
+            try:
+                location = LocationUpdate.objects.get(id=pk)
+            except (ValueError, LocationUpdate.DoesNotExist):
+                return create_error_response(
+                    error_message=f'Location with ID "{pk}" not found.',
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    errors={'id': [f'Location with ID "{pk}" not found.']}
+                )
+            
+            validated_data = serializer.validated_data
+            
+            # Update user if provided
+            if validated_data.get('userId'):
+                try:
+                    user = User.objects.get(id=validated_data['userId'])
+                    location.user = user
+                except User.DoesNotExist:
+                    return create_error_response(
+                        error_message=f'User with ID "{validated_data["userId"]}" not found.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'userId': [f'User with ID "{validated_data["userId"]}" not found.']}
+                    )
+            
+            # Update trip if provided
+            if validated_data.get('tripId'):
+                try:
+                    trip = Trip.objects.get(id=validated_data['tripId'])
+                    location.trip = trip
+                except Trip.DoesNotExist:
+                    return create_error_response(
+                        error_message=f'Trip with ID "{validated_data["tripId"]}" not found.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'tripId': [f'Trip with ID "{validated_data["tripId"]}" not found.']}
+                    )
+            
+            # Update fields
+            if 'latitude' in validated_data:
+                location.latitude = validated_data['latitude']
+            if 'longitude' in validated_data:
+                location.longitude = validated_data['longitude']
+            if 'speed' in validated_data:
+                location.speed = validated_data['speed']
+            if 'heading' in validated_data:
+                location.heading = validated_data['heading']
+            if 'altitude' in validated_data:
+                location.altitude = validated_data['altitude']
+            if 'satellites' in validated_data:
+                location.satellites = validated_data['satellites']
+            if 'hdop' in validated_data:
+                location.hdop = validated_data['hdop']
+            if 'gsmSignal' in validated_data:
+                location.gsm_signal = validated_data['gsmSignal']
+            if 'odometer' in validated_data:
+                location.odometer = validated_data['odometer']
+            
+            location.save()
+            
+            return create_success_response(data=location.id, messages=[])
+        except Exception as e:
+            return create_error_response(
+                error_message=f'An error occurred while updating location: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'error': [str(e)]}
+            )
+
+    @extend_schema(
+        tags=['Locations'],
+        operation_id='locations_destroy',
+        summary='Delete a location',
+        description='Delete a location by ID matching old Swagger format.',
+        responses={
+            200: OpenApiResponse(
+                response=dict,
+                description='Location deleted successfully',
+                examples=[
+                    OpenApiExample(
+                        'Success Response',
+                        value={
+                            "data": 1,
+                            "messages": [],
+                            "succeeded": True
+                        }
+                    )
+                ]
+            )
+        }
+    )
+    def destroy(self, request, pk=None):
+        """Delete a location matching old Swagger format."""
+        try:
+            try:
+                location = LocationUpdate.objects.get(id=pk)
+            except (ValueError, LocationUpdate.DoesNotExist):
+                return create_error_response(
+                    error_message=f'Location with ID "{pk}" not found.',
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    errors={'id': [f'Location with ID "{pk}" not found.']}
+                )
+            
+            location_id = location.id
+            location.delete()
+            
+            return create_success_response(data=location_id, messages=[])
+        except Exception as e:
+            return create_error_response(
+                error_message=f'An error occurred while deleting location: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'error': [str(e)]}
+            )
+
+    @extend_schema(
+        tags=['Locations'],
+        operation_id='locations_search',
+        summary='Search locations using available filters',
+        description='Search locations with filters matching old Swagger format.',
+        request=LocationSearchRequestSerializer,
+        examples=[
+            OpenApiExample(
+                'Search locations',
                 value={
                     'advancedSearch': {
                         'fields': ['string'],
@@ -456,227 +406,304 @@ class LocalizationViewSet(viewsets.ModelViewSet):
                     'keyword': 'string',
                     'pageNumber': 0,
                     'pageSize': 0,
-                    'orderBy': ['string']
-                }
+                    'orderBy': ['string'],
+                    'userId': 'string',
+                    'tripId': 0
+                },
+                request_only=True
             )
         ],
         responses={
             200: OpenApiResponse(
-                response=serializers.Serializer,
-                description='Paginated search results',
+                response=dict,
+                description='Paginated list of locations',
                 examples=[
                     OpenApiExample(
-                        'Success response',
+                        'Success Response',
                         value={
-                            'data': [],
-                            'currentPage': 1,
-                            'totalPages': 0,
-                            'totalCount': 0,
-                            'pageSize': 1,
-                            'hasPreviousPage': False,
-                            'hasNextPage': False,
-                            'messages': None,
-                            'succeeded': True
+                            "data": [],
+                            "currentPage": 1,
+                            "totalPages": 0,
+                            "totalCount": 0,
+                            "pageSize": 1,
+                            "hasPreviousPage": False,
+                            "hasNextPage": False,
+                            "messages": None,
+                            "succeeded": True
                         }
                     )
                 ]
-            ),
-            400: {'description': 'Validation error'}
+            )
         }
     )
-    @action(detail=False, methods=['post'], url_path='search', permission_classes=[IsAuthenticated, IsManager])
+    @action(detail=False, methods=['post'], url_path='search')
     def search(self, request):
-        """Search localizations with pagination matching old Swagger format."""
+        """Search locations matching old Swagger format."""
         try:
-            # Handle empty request body - request.data is read-only, so use get() or empty dict
-            request_data = request.data if request.data else {}
-            
-            # Validate input
-            serializer = LocalizationSearchRequestSerializer(data=request_data)
+            serializer = LocationSearchRequestSerializer(data=request.data)
             if not serializer.is_valid():
-                errors = {}
-                for field, error_list in serializer.errors.items():
-                    errors[field] = [str(error) for error in error_list]
                 return create_error_response(
-                    error_message='Validation failed',
+                    error_message='Validation error',
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    errors=errors
+                    errors=serializer.errors
                 )
             
             validated_data = serializer.validated_data
             
-            # Get pagination parameters (can be 0)
-            page_number = validated_data.get('pageNumber', 0)
-            page_size = validated_data.get('pageSize', 0)
+            # Start with all locations
+            qs = LocationUpdate.objects.all().select_related('user', 'trip')
             
-            # Get keyword from request or advancedSearch
-            keyword = validated_data.get('keyword') or ''
-            advanced_search = validated_data.get('advancedSearch')
-            if advanced_search and advanced_search.get('keyword'):
-                keyword = advanced_search.get('keyword') or keyword
+            # Filter by userId if provided
+            user_id = validated_data.get('userId')
+            if user_id:
+                # Strip whitespace and handle empty strings
+                user_id = str(user_id).strip()
+                if user_id:
+                    try:
+                        # Try to parse as UUID
+                        import uuid
+                        user_uuid = uuid.UUID(user_id)
+                        user = User.objects.get(id=user_uuid)
+                        qs = qs.filter(user=user)
+                    except (ValueError, TypeError):
+                        # If not a valid UUID, return error
+                        return create_error_response(
+                            error_message=f'Invalid user ID format: "{user_id}". Expected UUID.',
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            errors={'userId': [f'Invalid user ID format. Expected UUID.']}
+                        )
+                    except User.DoesNotExist:
+                        return create_error_response(
+                            error_message=f'User with ID "{user_id}" not found.',
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            errors={'userId': [f'User with ID "{user_id}" not found.']}
+                        )
             
-            # Build query
-            qs = Localization.objects.all()
+            # Filter by tripId if provided
+            trip_id = validated_data.get('tripId')
+            if trip_id is not None:
+                qs = qs.filter(trip_id=trip_id)
             
             # Apply keyword search
+            keyword = validated_data.get('keyword', '')
             if keyword:
                 qs = qs.filter(
-                    Q(key__icontains=keyword) |
-                    Q(value__icontains=keyword) |
-                    Q(resource_set__icontains=keyword) |
-                    Q(locale__icontains=keyword)
+                    Q(heading__icontains=keyword)
                 )
             
-            # Apply orderBy if provided
+            # Apply advanced search if provided
+            advanced_search = validated_data.get('advancedSearch')
+            if advanced_search and advanced_search.get('keyword'):
+                adv_keyword = advanced_search['keyword']
+                qs = qs.filter(
+                    Q(heading__icontains=adv_keyword)
+                )
+            
+            # Apply ordering
             order_by = validated_data.get('orderBy', [])
-            valid_order_fields = ['key', 'value', 'resource_set', 'locale', 'created_at', 'updated_at']
             if order_by:
-                # Filter valid fields and add '-' prefix for descending if needed
                 order_fields = []
                 for field in order_by:
-                    if field and field.strip():
-                        field_clean = field.strip().lstrip('-')
-                        if field_clean in valid_order_fields:
-                            if field.startswith('-'):
-                                order_fields.append(f'-{field_clean}')
-                            else:
-                                order_fields.append(field_clean)
+                    if field:
+                        # Map camelCase to snake_case
+                        field_mapping = {
+                            'userId': 'user_id',
+                            'tripId': 'trip_id',
+                            'gsmSignal': 'gsm_signal',
+                            'createdOn': 'created_at',
+                        }
+                        db_field = field_mapping.get(field, field)
+                        if hasattr(LocationUpdate, db_field):
+                            order_fields.append(db_field)
                 if order_fields:
                     qs = qs.order_by(*order_fields)
-                else:
-                    qs = qs.order_by('resource_set', 'key', 'locale')
             else:
-                qs = qs.order_by('resource_set', 'key', 'locale')
+                qs = qs.order_by('-created_at')
             
             # Get total count
             total_count = qs.count()
-            items_data = []
             
-            # Calculate pagination
-            if page_size > 0:
-                total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 0
-                # Handle pageNumber 0 - treat as page 1
-                effective_page = page_number if page_number > 0 else 1
-                has_previous = effective_page > 1
-                has_next = effective_page < total_pages
-                
-                # Apply pagination
-                start = (effective_page - 1) * page_size
-                end = start + page_size
-                items = qs[start:end]
-                serializer = self.get_serializer(items, many=True)
-                items_data = serializer.data
-            else:
-                # If pageSize is 0, return all results
-                total_pages = 0
-                effective_page = 1
-                has_previous = False
-                has_next = False
-                serializer = self.get_serializer(qs, many=True)
-                items_data = serializer.data
+            # Handle pagination (pageNumber: 0 defaults to 1, pageSize: 0 defaults to 1)
+            page_number = validated_data.get('pageNumber', 0)
+            page_size = validated_data.get('pageSize', 0)
+            
+            if page_number == 0:
+                page_number = 1
+            if page_size == 0:
+                page_size = 1
+            
+            # Apply pagination
+            start = (page_number - 1) * page_size
+            end = start + page_size
+            locations = qs[start:end]
+            
+            # Convert to old Swagger format
+            locations_data = [location_to_old_swagger_format(loc) for loc in locations]
+            
+            # Calculate pagination metadata
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 0
+            has_previous_page = page_number > 1
+            has_next_page = page_number < total_pages if total_pages > 0 else False
             
             # Build response matching old Swagger format
-            # If pageSize is 0, show actual number of items returned (or 1 if empty, as per old Swagger example)
-            response_page_size = page_size if page_size > 0 else (len(items_data) if items_data else 1)
-            
             response_data = {
-                'data': items_data,
-                'currentPage': effective_page,
+                'data': locations_data,
+                'currentPage': page_number,
                 'totalPages': total_pages,
                 'totalCount': total_count,
-                'pageSize': response_page_size,
-                'hasPreviousPage': has_previous,
-                'hasNextPage': has_next,
-                'messages': None,  # Old Swagger shows null, not empty array
+                'pageSize': page_size,
+                'hasPreviousPage': has_previous_page,
+                'hasNextPage': has_next_page,
+                'messages': None,  # Old Swagger shows null
                 'succeeded': True
             }
             
             return Response(response_data, status=status.HTTP_200_OK)
-        
         except Exception as e:
-            # Catch any unexpected errors and return proper JSON response
-            error_detail = str(e)
-            error_type = type(e).__name__
-            
             return create_error_response(
-                error_message=f'An error occurred while processing the request: {error_detail}',
+                error_message=f'An error occurred while searching locations: {str(e)}',
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                errors={'error': [f'{error_type}: {error_detail}']}
+                errors={'error': [str(e)]}
             )
 
 
 @extend_schema(
-    tags=['Localizations'],
-    operation_id='localizations_resourcesets',
-    summary='Get resource sets',
-    description='Get list of all resource sets matching old Swagger format.',
+    tags=['Locations'],
+    operation_id='locations_get_by_job_id',
+    summary='Get locations by job ID',
+    description='Get all locations associated with a specific job ID (delivery ID) matching old Swagger format. '
+                'To get delivery IDs, use GET /api/v1/driverdelivery/ or POST /api/v1/driverdelivery/search. '
+                'The delivery "id" field is what you use as the "jobid" parameter here.',
     responses={
         200: OpenApiResponse(
-            response=serializers.Serializer,
-            description='List of resource set names',
+            response=dict,
+            description='List of locations for the job',
             examples=[
                 OpenApiExample(
-                    'Success response',
+                    'Success Response',
                     value={
-                        'data': ['asdf', 'string'],
-                        'messages': [],
-                        'succeeded': True
+                        "data": [],
+                        "messages": [],
+                        "succeeded": True
                     }
                 )
             ]
         )
     }
 )
-class LocalizationsResourceSetsView(APIView):
-    """GET /api/v1/localizations/resourcesets - Get resource sets"""
-    permission_classes = [AllowAny]
+class LocationsGetByJobIdView(APIView):
+    """GET /api/v1/locations/job-id/{jobid}
+    
+    Note: jobid is a delivery ID. Get delivery IDs from:
+    - GET /api/v1/driverdelivery/ (list all deliveries)
+    - POST /api/v1/driverdelivery/search (search deliveries)
+    - GET /api/v1/driverdelivery/{id} (get specific delivery)
+    """
+    permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        """Get list of all resource sets matching old Swagger format."""
-        # Get unique resource set names
-        resource_sets = Localization.objects.values_list('resource_set', flat=True).distinct().order_by('resource_set')
+    def get(self, request, jobid):
+        """Get locations by job ID (delivery ID) matching old Swagger format.
         
-        # Return as array of strings
-        return create_success_response(data=list(resource_sets), messages=[])
+        Args:
+            jobid: Delivery ID (UUID string or integer hash). 
+                   Get delivery IDs from /api/v1/driverdelivery/ endpoints.
+        """
+        try:
+            # Try to get delivery by UUID first, then by integer
+            try:
+                delivery = Delivery.objects.get(id=jobid)
+            except (ValueError, Delivery.DoesNotExist):
+                # Try to find by integer hash
+                import hashlib
+                deliveries = Delivery.objects.all()
+                delivery = None
+                for d in deliveries:
+                    delivery_id_str = str(d.id).replace('-', '')
+                    delivery_id_int = int(hashlib.md5(delivery_id_str.encode()).hexdigest()[:8], 16) % 100000000
+                    if str(delivery_id_int) == str(jobid):
+                        delivery = d
+                        break
+                
+                if not delivery:
+                    return create_error_response(
+                        error_message=f'Delivery (job) with ID "{jobid}" not found.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'jobid': [f'Delivery (job) with ID "{jobid}" not found.']}
+                    )
+            
+            # Get locations for trips associated with the delivery's driver
+            driver = delivery.driver
+            # Get all trips for this driver, then get locations for those trips
+            trips = Trip.objects.filter(user=driver)
+            locations = LocationUpdate.objects.filter(trip__in=trips).select_related('user', 'trip').order_by('-created_at')
+            
+            # Convert to old Swagger format
+            locations_data = [location_to_old_swagger_format(loc) for loc in locations]
+            
+            return create_success_response(data=locations_data, messages=[])
+        except Exception as e:
+            return create_error_response(
+                error_message=f'An error occurred while getting locations by job ID: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'error': [str(e)]}
+            )
 
 
 @extend_schema(
-    tags=['Localizations'],
-    operation_id='localizations_client_by_resourceset',
-    summary='Get localizations by resource set',
-    description='Get localizations for a specific resource set matching old Swagger format.',
+    tags=['Locations'],
+    operation_id='locations_all',
+    summary='Get all locations',
+    description='Get all locations matching old Swagger format.',
     responses={
         200: OpenApiResponse(
-            response=serializers.Serializer,
-            description='List of localizations',
+            response=dict,
+            description='List of all locations',
             examples=[
                 OpenApiExample(
-                    'Success response',
+                    'Success Response',
                     value={
-                        'data': [],
-                        'messages': [],
-                        'succeeded': True
+                        "data": [
+                            {
+                                "id": 1,
+                                "userId": "85edc2ba-81db-4648-b008-816aa2ad1dd2",
+                                "tripId": 2,
+                                "latitude": 36.312794,
+                                "longitude": 59.590782,
+                                "speed": 0,
+                                "heading": "110.00298309326172",
+                                "altitude": 995.7,
+                                "satellites": 0,
+                                "hdop": 0,
+                                "gsmSignal": 0,
+                                "odometer": 0,
+                                "createdOn": "2024-03-13T07:23:45.2071278"
+                            }
+                        ],
+                        "messages": [],
+                        "succeeded": True
                     }
                 )
             ]
         )
     }
 )
-class LocalizationsClientByResourceSetView(APIView):
-    """GET /api/v1/localizations/client/by-resourceset/{set} - Get localizations by resource set"""
-    permission_classes = [AllowAny]
+class LocationsAllView(APIView):
+    """GET /api/v1/locations/all"""
+    permission_classes = [IsAuthenticated]
 
-    def get(self, request, set):
-        """Get localizations for a specific resource set matching old Swagger format."""
-        locale = request.query_params.get('locale', 'en')
-        
-        localizations = Localization.objects.filter(
-            resource_set=set,
-            locale=locale,
-            is_active=True
-        ).order_by('key')
-
-        # Return as array matching old Swagger format
-        # Old Swagger returns empty array, but we could return localization objects if needed
-        return create_success_response(data=[], messages=[])
+    def get(self, request):
+        """Get all locations matching old Swagger format."""
+        try:
+            locations = LocationUpdate.objects.all().select_related('user', 'trip').order_by('-created_at')
+            
+            # Convert to old Swagger format
+            locations_data = [location_to_old_swagger_format(loc) for loc in locations]
+            
+            return create_success_response(data=locations_data, messages=[])
+        except Exception as e:
+            return create_error_response(
+                error_message=f'An error occurred while getting all locations: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                errors={'error': [str(e)]}
+            )
 
