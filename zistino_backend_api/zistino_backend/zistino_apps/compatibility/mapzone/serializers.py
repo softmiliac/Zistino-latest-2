@@ -58,6 +58,28 @@ class MapZoneCreateSerializer(serializers.Serializer):
     zonepath = serializers.CharField(required=False, allow_blank=True, default='', help_text='Zone path')
     description = serializers.CharField(required=False, allow_blank=True, default='', help_text='Zone description')
     address = serializers.CharField(required=False, allow_blank=True, default='', help_text='Zone address')
+    centerLatitude = serializers.DecimalField(
+        required=False, 
+        allow_null=True, 
+        max_digits=9, 
+        decimal_places=6,
+        help_text='Zone center point latitude (for geographic zones)'
+    )
+    centerLongitude = serializers.DecimalField(
+        required=False, 
+        allow_null=True, 
+        max_digits=9, 
+        decimal_places=6,
+        help_text='Zone center point longitude (for geographic zones)'
+    )
+    radiusKm = serializers.DecimalField(
+        required=False, 
+        allow_null=True, 
+        max_digits=10, 
+        decimal_places=2,
+        default=10.0,
+        help_text='Zone radius in kilometers (default: 10.0 km)'
+    )
     
     def create(self, validated_data):
         """Create a new zone."""
@@ -67,6 +89,9 @@ class MapZoneCreateSerializer(serializers.Serializer):
             zonepath=validated_data.get('zonepath', ''),
             description=validated_data.get('description', ''),
             address=validated_data.get('address', ''),
+            center_latitude=validated_data.get('centerLatitude'),
+            center_longitude=validated_data.get('centerLongitude'),
+            radius_km=validated_data.get('radiusKm', 10.0),
             is_active=True
         )
 
