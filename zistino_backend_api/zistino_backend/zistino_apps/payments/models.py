@@ -38,6 +38,14 @@ class Transaction(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sent_transactions',
+        help_text='User who initiated/sent this transaction (admin/manager)'
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPE_CHOICES)
     status = models.CharField(max_length=20, choices=TRANSACTION_STATUS_CHOICES, default='pending')
