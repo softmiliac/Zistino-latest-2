@@ -20,6 +20,7 @@ import {
   useDriversAll,
   useCreateUserInZone,
   useGetUserInZone,
+  useSearchUserInZone,
   useDeleteZoneInZone,
   ZoneSchema,
   errorAlert,
@@ -50,13 +51,15 @@ const Zone: FC = () => {
   )[0];
 
   // Get drivers in selected zone
-  const { data: userZonesData } = useGetUserInZone(selectedZoneForAssignment?.toString() || "");
+  const { data: userZonesData } = useSearchUserInZone(selectedZoneForAssignment);
   const userZones = Array.isArray(userZonesData) ? userZonesData : (userZonesData?.data || []);
 
   const createFormik = useFormik<IZone>({
     initialValues: {
       zone: "",
       description: "",
+      zonepath: "",
+      address: "",
     },
     validateOnBlur: false,
     validateOnChange: false,
