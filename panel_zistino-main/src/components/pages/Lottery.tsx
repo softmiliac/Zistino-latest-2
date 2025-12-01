@@ -8,7 +8,6 @@ import {
     ProTable,
     useLotteryWinners,
     usePointsSearch,
-    useDriversPointsList,
     useMyReferralCode,
     useMyReferrals,
 } from "../../";
@@ -24,7 +23,6 @@ const Lottery: FC = () => {
 
     const { data: winners, isLoading: loadingWinners } = useLotteryWinners();
     const { data: pointsHistory, isLoading: loadingHistory } = usePointsSearch(page, perPage);
-    const { data: driversList, isLoading: loadingDriversList } = useDriversPointsList(page, perPage);
     const { data: referralCode, isLoading: loadingCode } = useMyReferralCode();
     const { data: myReferrals, isLoading: loadingReferrals } = useMyReferrals();
 
@@ -56,6 +54,11 @@ const Lottery: FC = () => {
 
     const pointsHistoryColumns: ColumnsType<any> = [
         {
+            title: t("date"),
+            dataIndex: "createdAt",
+            render: (value) => value ? new Date(value).toLocaleDateString() : "-",
+        },
+        {
             title: t("user_phone") || "شماره تلفن",
             dataIndex: "userPhone",
             render: (value) => value || "-",
@@ -66,13 +69,19 @@ const Lottery: FC = () => {
             render: (value) => value || "-",
         },
         {
-            title: t("points") || "امتیاز",
-            dataIndex: "points",
+            title: t("amount"),
+            dataIndex: "amount",
             render: (value) => (
-                <Tag color={value > 0 ? "green" : "default"}>
-                    {value || 0} {t("points")}
+                <Tag color={value > 0 ? "green" : "red"}>
+                    {value > 0 ? "+" : ""}{value} {t("points")}
                 </Tag>
             ),
+        },
+        {
+            title: t("description"),
+            dataIndex: "description",
+            ellipsis: true,
+            render: (value) => value || "-",
         },
     ];
 
@@ -178,15 +187,20 @@ const Lottery: FC = () => {
                     }
                     key="points-history"
                 >
-                    {loadingDriversList ? (
+                    {loadingHistory ? (
                         <div>{t("loading")}</div>
                     ) : (
                         <ProTable
                             columns={pointsHistoryColumns}
                             dataSource={
-                                Array.isArray(driversList?.items) ? driversList.items : Array.isArray(driversList?.data) ? driversList.data : []
+                                (Array.isArray(pointsHistory?.items) ? pointsHistory.items : Array.isArray(pointsHistory?.data) ? pointsHistory.data : [])
+                                    .filter((transaction: any) => transaction.source !== 'lottery') // Filter out ticket purchases
+                                    .map((transaction: any) => ({
+                                        ...transaction,
+                                        referredName: transaction.referredName || null,
+                                    }))
                             }
-                            configData={driversList ? { ...driversList, totalCount: driversList.total || driversList.data?.length || 0 } : null}
+                            configData={pointsHistory ? { ...pointsHistory, totalCount: pointsHistory.total || pointsHistory.data?.length || 0 } : null}
                             page={page}
                             perPage={perPage}
                             setPage={setPage}
