@@ -195,6 +195,13 @@ class MapZoneViewSet(viewsets.ModelViewSet):
             instance.zonepath = validated_data.get('zonepath', '')
             instance.description = validated_data.get('description', '')
             instance.address = validated_data.get('address', '')
+            # Update geographic fields if provided
+            if 'centerLatitude' in validated_data:
+                instance.center_latitude = validated_data.get('centerLatitude')
+            if 'centerLongitude' in validated_data:
+                instance.center_longitude = validated_data.get('centerLongitude')
+            if 'radiusKm' in validated_data:
+                instance.radius_km = validated_data.get('radiusKm', 10.0)
             instance.save()
             
             # Return updated data
@@ -293,12 +300,26 @@ class MapZoneViewSet(viewsets.ModelViewSet):
         request=MapZoneCreateSerializer,
         examples=[
             OpenApiExample(
-                'Create zone',
+                'Create zone (old Swagger format)',
+                description='Basic zone creation matching old Swagger format. Geographic fields are optional.',
                 value={
                     'zone': 'string',
                     'zonepath': 'string',
                     'description': 'string',
                     'address': 'string'
+                }
+            ),
+            OpenApiExample(
+                'Create zone with geographic data',
+                description='Create zone with geographic center and radius for driver delivery matching.',
+                value={
+                    'zone': 'Zone Tehran Center',
+                    'zonepath': '',
+                    'description': 'منطقه مرکز تهران',
+                    'address': 'تهران، خیابان ولیعصر',
+                    'centerLatitude': 35.6892,
+                    'centerLongitude': 51.3890,
+                    'radiusKm': 10.0
                 }
             )
         ],
@@ -598,8 +619,14 @@ class MapZoneSearchUserInZoneView(APIView):
                     errors={'zoneId': [f'Zone with ID "{zone_id}" not found.']}
                 )
             
-            # Old Swagger returns empty array
-            return Response([], status=status.HTTP_200_OK)
+            # Get users in this zone
+            user_zones = UserZone.objects.filter(zone=zone).select_related('user', 'zone').order_by('-last_modified_on')
+            
+            # Serialize user zones
+            serializer = UserZoneSerializer(user_zones, many=True)
+            
+            # Return in old Swagger format (array directly) - Flutter compatibility
+            return Response(serializer.data, status=status.HTTP_200_OK)
         
         except Exception as e:
             # Catch any unexpected errors and return proper JSON response
@@ -659,16 +686,22 @@ class MapZoneUserInZoneView(APIView):
                     errors={'userid': ['userid is required as query parameter']}
                 )
             
-            # Get user by UUID
+            # Get user by UUID or phone number
+            user = None
             try:
+                # Try UUID first
                 user_uuid = uuid.UUID(user_id_str)
                 user = User.objects.get(pk=user_uuid)
             except (ValueError, TypeError):
-                return create_error_response(
-                    error_message=f'Invalid user ID format: "{user_id_str}". Expected UUID.',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    errors={'userid': [f'Invalid user ID format: "{user_id_str}". Expected UUID.']}
-                )
+                # If not UUID, try phone number
+                try:
+                    user = User.objects.get(phone_number=user_id_str)
+                except User.DoesNotExist:
+                    return create_error_response(
+                        error_message=f'User with ID "{user_id_str}" not found. Expected UUID or phone number.',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'userid': [f'User with ID "{user_id_str}" not found. Expected UUID or phone number.']}
+                    )
             except User.DoesNotExist:
                 return create_error_response(
                     error_message=f'User with ID "{user_id_str}" not found.',
