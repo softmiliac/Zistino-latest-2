@@ -24,16 +24,21 @@ router = NoTrailingSlashRouter()
 router.register(r'', views.MapZoneViewSet, basename='mapzone')
 
 urlpatterns = [
-    # USER IN ZONE ENDPOINTS WITH PATH PARAMETERS (Must come before router to avoid conflicts)
+    # USER IN ZONE ENDPOINTS WITH PATH PARAMETERS (Must come FIRST to avoid conflicts with router)
     path('userinzone/<int:id>', views.MapZoneUserInZoneDeleteView.as_view(), name='mapzone-userinzone-delete'),
     
-    # SPECIAL ENDPOINTS (Must come before router to avoid conflicts)
+    # SPECIAL ENDPOINTS (Must come BEFORE router to avoid conflicts)
+    # These must be exact matches before router's dynamic routes
     path('search', views.MapZoneViewSet.as_view({'post': 'search'}), name='mapzone-search'),
     path('searchuserinzone', views.MapZoneSearchUserInZoneView.as_view(), name='mapzone-searchuserinzone'),
     path('userinzone', views.MapZoneUserInZoneView.as_view(), name='mapzone-userinzone'),
     path('createuserinzone', views.MapZoneCreateUserInZoneView.as_view(), name='mapzone-createuserinzone'),
     
-    # STANDARD REST ENDPOINTS (via router)
+    # STANDARD REST ENDPOINTS (via router) - MUST come LAST
+    # Router handles: 
+    # - GET/POST /api/v1/mapzone (list/create)
+    # - GET/PUT/DELETE /api/v1/mapzone/{id} (retrieve/update/destroy)
+    # - POST /api/v1/mapzone/search (via @action decorator)
     path('', include(router.urls)),
 ]
 
