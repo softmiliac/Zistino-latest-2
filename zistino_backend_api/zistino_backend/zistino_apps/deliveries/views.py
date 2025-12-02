@@ -2067,6 +2067,14 @@ class ManagerDeliveryViewSet(viewsets.ModelViewSet):
                 total_amount = (total_weight * (global_rate or Decimal('0'))).quantize(Decimal('0.01'))
                 breakdown = []
                 rate_source = 'waste_price_per_kg'
+        except Exception as e:
+            logger.error(f"Error building breakdown: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Fallback: use delivered_weight and global rate
+            total_weight = Decimal(str(delivery.delivered_weight or 0))
+            total_amount = (total_weight * (global_rate or Decimal('0'))).quantize(Decimal('0.01'))
+            breakdown = []
+            rate_source = 'waste_price_per_kg'
 
             return Response({
                 'deliveryId': str(delivery.id),
@@ -2442,7 +2450,7 @@ class ManagerDriverRouteView(APIView):
                                 delivered_weight_str = f"{float(delivery.delivered_weight):.2f}"
                             except (ValueError, TypeError):
                                 delivered_weight_str = "0.00"
-                        
+
                         pickup_locations.append({
                             'deliveryId': str(delivery.id),
                             'customerAddress': delivery.address or '',
@@ -2482,7 +2490,7 @@ class ManagerDriverRouteView(APIView):
                         avg_speed = float(trip.average_speed)
                     except (TypeError, ValueError):
                         avg_speed = 0.0
-                
+
                 trips_data.append({
                     'tripId': trip.id,
                     'startTime': trip.created_at.isoformat() if trip.created_at else None,
@@ -2513,7 +2521,6 @@ class ManagerDriverRouteView(APIView):
                     'averageTimePerPickup': int(avg_pickup_time)
                 }
             })
-        
         except Exception as e:
             import traceback
             error_trace = traceback.format_exc()
@@ -3121,7 +3128,7 @@ class AdminDeliverySurveysSearchView(APIView):
                             driver = survey.delivery.driver
                     
                     user = getattr(survey, 'user', None)
-                    
+            
                     driver_name = ''
                     if driver:
                         try:
@@ -3133,7 +3140,7 @@ class AdminDeliverySurveysSearchView(APIView):
                         except (AttributeError, Exception) as e:
                             logger.warning(f'Error getting driver name for survey {survey.id}: {str(e)}')
                             driver_name = ''
-                    
+            
                     user_full_name = ''
                     if user:
                         try:
@@ -3145,7 +3152,7 @@ class AdminDeliverySurveysSearchView(APIView):
                         except (AttributeError, Exception) as e:
                             logger.warning(f'Error getting user name for survey {survey.id}: {str(e)}')
                             user_full_name = ''
-                    
+            
                     surveys_data.append({
                         'id': str(survey.id),
                         'driverName': driver_name,
