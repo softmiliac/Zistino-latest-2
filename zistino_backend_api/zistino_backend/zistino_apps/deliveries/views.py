@@ -2300,160 +2300,186 @@ class ManagerDriverRouteView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
 
     def post(self, request, driver_id):
-        from django.contrib.auth import get_user_model
-        from django.utils.dateparse import parse_date
-        from datetime import datetime, timedelta
-
-        User = get_user_model()
+        import traceback
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # Get driver
         try:
-            driver = User.objects.get(id=driver_id, is_driver=True)
-        except User.DoesNotExist:
-            return Response({'detail': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
+            from django.contrib.auth import get_user_model
+            from django.utils.dateparse import parse_date
+            from datetime import datetime, timedelta
 
-        # Parse date (default to today)
-        from django.utils import timezone
-        date_str = request.data.get('date')
-        if date_str:
-            target_date = parse_date(date_str)
-            if not target_date:
-                return Response({'detail': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            target_date = timezone.now().date()
+            User = get_user_model()
+            
+            # Get driver
+            try:
+                driver = User.objects.get(id=driver_id, is_driver=True)
+            except User.DoesNotExist:
+                return Response({'detail': 'Driver not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Date range for the day (timezone-aware)
-        date_start = timezone.make_aware(datetime.combine(target_date, datetime.min.time()))
-        date_end = timezone.make_aware(datetime.combine(target_date, datetime.max.time()))
+            # Parse date (default to today)
+            from django.utils import timezone
+            date_str = request.data.get('date')
+            if date_str:
+                target_date = parse_date(date_str)
+                if not target_date:
+                    return Response({'detail': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                target_date = timezone.now().date()
 
-        # Get trips for this driver on this date
-        trips = Trip.objects.filter(
-            user=driver,
-            created_at__gte=date_start,
-            created_at__lte=date_end
-        ).order_by('created_at')
+            # Date range for the day (timezone-aware)
+            date_start = timezone.make_aware(datetime.combine(target_date, datetime.min.time()))
+            date_end = timezone.make_aware(datetime.combine(target_date, datetime.max.time()))
 
-        # Get deliveries for this driver on this date
-        deliveries = Delivery.objects.filter(
-            driver=driver,
-            delivery_date__gte=date_start,
-            delivery_date__lte=date_end
-        ).select_related('order', 'order__user')
-
-        # Build response
-        trips_data = []
-        total_distance = 0
-        total_duration = 0
-        total_pickups = 0
-        total_pickup_time = 0
-        matched_deliveries = set()  # Track deliveries already matched to avoid duplicates
-
-        for trip in trips:
-            # Get location updates for this trip
-            locations = LocationUpdate.objects.filter(
-                trip=trip
+            # Get trips for this driver on this date
+            trips = Trip.objects.filter(
+                user=driver,
+                created_at__gte=date_start,
+                created_at__lte=date_end
             ).order_by('created_at')
 
-            route_points = []
-            for loc in locations:
-                route_points.append({
-                    'latitude': float(loc.latitude),
-                    'longitude': float(loc.longitude),
-                    'timestamp': loc.created_at.isoformat(),
-                    'speed': loc.speed
+            # Get deliveries for this driver on this date
+            deliveries = Delivery.objects.filter(
+                driver=driver,
+                delivery_date__gte=date_start,
+                delivery_date__lte=date_end
+            ).select_related('order', 'order__user')
+
+            # Build response
+            trips_data = []
+            total_distance = 0
+            total_duration = 0
+            total_pickups = 0
+            total_pickup_time = 0
+            matched_deliveries = set()  # Track deliveries already matched to avoid duplicates
+
+            for trip in trips:
+                # Get location updates for this trip
+                locations = LocationUpdate.objects.filter(
+                    trip=trip
+                ).order_by('created_at')
+
+                route_points = []
+                for loc in locations:
+                    # Skip if latitude or longitude is None
+                    if loc.latitude is None or loc.longitude is None:
+                        continue
+                    
+                    route_points.append({
+                        'latitude': float(loc.latitude),
+                        'longitude': float(loc.longitude),
+                        'timestamp': loc.created_at.isoformat() if loc.created_at else None,
+                        'speed': loc.speed if loc.speed is not None else 0
+                    })
+
+                # Find pickup locations by matching deliveries to location updates
+                pickup_locations = []
+                for delivery in deliveries:
+                    if not delivery.latitude or not delivery.longitude:
+                        continue
+                    
+                    # Skip if already matched to another trip
+                    if delivery.id in matched_deliveries:
+                        continue
+
+                    # Find location updates where driver stopped near delivery location
+                    # Threshold: within 100 meters (approx 0.001 degrees)
+                    delivery_lat = float(delivery.latitude)
+                    delivery_lng = float(delivery.longitude)
+                    threshold = 0.001  # ~100 meters
+
+                    pickup_locs = []
+                    for loc in locations:
+                        # Skip if latitude or longitude is None
+                        if loc.latitude is None or loc.longitude is None:
+                            continue
+                        
+                        lat_diff = abs(float(loc.latitude) - delivery_lat)
+                        lng_diff = abs(float(loc.longitude) - delivery_lng)
+                        
+                        # If stopped near delivery location (speed < 5 km/h or 0)
+                        loc_speed = loc.speed if loc.speed is not None else 0
+                        if lat_diff < threshold and lng_diff < threshold and loc_speed < 5:
+                            pickup_locs.append(loc)
+
+                    if pickup_locs:
+                        # Mark as matched
+                        matched_deliveries.add(delivery.id)
+                        
+                        # Calculate arrival and departure times
+                        arrival = min(pickup_locs, key=lambda x: x.created_at if x.created_at else datetime.max)
+                        departure = max(pickup_locs, key=lambda x: x.created_at if x.created_at else datetime.min)
+                        
+                        # Skip if arrival or departure time is None
+                        if not arrival.created_at or not departure.created_at:
+                            continue
+                        
+                        time_spent = (departure.created_at - arrival.created_at).total_seconds()
+                        
+                        # Format time spent
+                        minutes = int(time_spent // 60)
+                        seconds = int(time_spent % 60)
+                        if minutes > 0:
+                            time_formatted = f"{minutes} minute{'s' if minutes != 1 else ''}"
+                            if seconds > 0:
+                                time_formatted += f" {seconds} second{'s' if seconds != 1 else ''}"
+                        else:
+                            time_formatted = f"{seconds} second{'s' if seconds != 1 else ''}"
+
+                        pickup_locations.append({
+                            'deliveryId': str(delivery.id),
+                            'customerAddress': delivery.address or '',
+                            'customerPhone': delivery.phone_number or '',
+                            'latitude': delivery_lat,
+                            'longitude': delivery_lng,
+                            'arrivalTime': arrival.created_at.isoformat(),
+                            'departureTime': departure.created_at.isoformat(),
+                            'timeSpentSeconds': int(time_spent),
+                            'timeSpentFormatted': time_formatted,
+                            'deliveredWeight': f"{delivery.delivered_weight:.2f}" if delivery.delivered_weight else "0.00"
+                        })
+                        
+                        total_pickup_time += time_spent
+                        total_pickups += 1
+
+                trips_data.append({
+                    'tripId': trip.id,
+                    'startTime': trip.created_at.isoformat(),
+                    'endTime': (trip.created_at + timedelta(seconds=trip.duration)).isoformat() if trip.duration else None,
+                    'distance': float(trip.distance / 1000) if trip.distance else 0.0,  # Convert to km
+                    'duration': trip.duration,
+                    'averageSpeed': float(trip.average_speed) if trip.average_speed else 0.0,
+                    'routePoints': route_points,
+                    'pickupLocations': pickup_locations
                 })
 
-            # Find pickup locations by matching deliveries to location updates
-            pickup_locations = []
-            for delivery in deliveries:
-                if not delivery.latitude or not delivery.longitude:
-                    continue
-                
-                # Skip if already matched to another trip
-                if delivery.id in matched_deliveries:
-                    continue
+                total_distance += float(trip.distance / 1000) if trip.distance else 0.0
+                total_duration += trip.duration or 0
 
-                # Find location updates where driver stopped near delivery location
-                # Threshold: within 100 meters (approx 0.001 degrees)
-                delivery_lat = float(delivery.latitude)
-                delivery_lng = float(delivery.longitude)
-                threshold = 0.001  # ~100 meters
+            # Calculate summary
+            avg_pickup_time = total_pickup_time / total_pickups if total_pickups > 0 else 0
 
-                pickup_locs = []
-                for loc in locations:
-                    lat_diff = abs(float(loc.latitude) - delivery_lat)
-                    lng_diff = abs(float(loc.longitude) - delivery_lng)
-                    
-                    # If stopped near delivery location (speed < 5 km/h or 0)
-                    if lat_diff < threshold and lng_diff < threshold and loc.speed < 5:
-                        pickup_locs.append(loc)
-
-                if pickup_locs:
-                    # Mark as matched
-                    matched_deliveries.add(delivery.id)
-                    
-                    # Calculate arrival and departure times
-                    arrival = min(pickup_locs, key=lambda x: x.created_at)
-                    departure = max(pickup_locs, key=lambda x: x.created_at)
-                    
-                    time_spent = (departure.created_at - arrival.created_at).total_seconds()
-                    
-                    # Format time spent
-                    minutes = int(time_spent // 60)
-                    seconds = int(time_spent % 60)
-                    if minutes > 0:
-                        time_formatted = f"{minutes} minute{'s' if minutes != 1 else ''}"
-                        if seconds > 0:
-                            time_formatted += f" {seconds} second{'s' if seconds != 1 else ''}"
-                    else:
-                        time_formatted = f"{seconds} second{'s' if seconds != 1 else ''}"
-
-                    pickup_locations.append({
-                        'deliveryId': str(delivery.id),
-                        'customerAddress': delivery.address,
-                        'customerPhone': delivery.phone_number,
-                        'latitude': delivery_lat,
-                        'longitude': delivery_lng,
-                        'arrivalTime': arrival.created_at.isoformat(),
-                        'departureTime': departure.created_at.isoformat(),
-                        'timeSpentSeconds': int(time_spent),
-                        'timeSpentFormatted': time_formatted,
-                        'deliveredWeight': f"{delivery.delivered_weight:.2f}" if delivery.delivered_weight else "0.00"
-                    })
-                    
-                    total_pickup_time += time_spent
-                    total_pickups += 1
-
-            trips_data.append({
-                'tripId': trip.id,
-                'startTime': trip.created_at.isoformat(),
-                'endTime': (trip.created_at + timedelta(seconds=trip.duration)).isoformat() if trip.duration else None,
-                'distance': float(trip.distance / 1000) if trip.distance else 0.0,  # Convert to km
-                'duration': trip.duration,
-                'averageSpeed': float(trip.average_speed) if trip.average_speed else 0.0,
-                'routePoints': route_points,
-                'pickupLocations': pickup_locations
+            return Response({
+                'driverId': str(driver.id),
+                'driverPhone': driver.phone_number or '',
+                'date': target_date.isoformat(),
+                'trips': trips_data,
+                'summary': {
+                    'totalTrips': len(trips_data),
+                    'totalDistance': round(total_distance, 2),
+                    'totalDuration': total_duration,
+                    'totalPickups': total_pickups,
+                    'averageTimePerPickup': int(avg_pickup_time)
+                }
             })
-
-            total_distance += float(trip.distance / 1000) if trip.distance else 0.0
-            total_duration += trip.duration or 0
-
-        # Calculate summary
-        avg_pickup_time = total_pickup_time / total_pickups if total_pickups > 0 else 0
-
-        return Response({
-            'driverId': str(driver.id),
-            'driverPhone': driver.phone_number,
-            'date': target_date.isoformat(),
-            'trips': trips_data,
-            'summary': {
-                'totalTrips': len(trips_data),
-                'totalDistance': round(total_distance, 2),
-                'totalDuration': total_duration,
-                'totalPickups': total_pickups,
-                'averageTimePerPickup': int(avg_pickup_time)
-            }
-        })
+        
+        except Exception as e:
+            logger.error(f"Error in ManagerDriverRouteView.post: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {'detail': f'An error occurred: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 @extend_schema(
