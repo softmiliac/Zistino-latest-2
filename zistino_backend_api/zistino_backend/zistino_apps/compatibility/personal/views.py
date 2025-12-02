@@ -130,13 +130,44 @@ class PersonalProfileCombinedView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """Get current user profile - returns same format as profilecached (direct response)."""
+        """Get current user profile - returns same format as profilecached (direct response).
+        Optional query parameter: ?userId={uuid} to get another user's profile (requires manager permission).
+        """
         # Check authentication explicitly
         if not request.user or not request.user.is_authenticated:
             return create_authentication_error_response()
         
         try:
-            serializer = UserCompatibilitySerializer(request.user, context={'request': request})
+            # Check if userId is provided in query parameters
+            user_id = request.query_params.get('userId', '').strip()
+            
+            if user_id:
+                # Get another user's profile - requires manager permission
+                from zistino_apps.compatibility.permissions import IsManager
+                if not IsManager().has_permission(request, self):
+                    return create_error_response(
+                        error_message='You do not have permission to view other users profiles. Manager permission required.',
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        errors={'permission': ['Manager permission required']}
+                    )
+                
+                # Get user by ID
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                try:
+                    target_user = User.objects.get(pk=user_id)
+                except User.DoesNotExist:
+                    return create_error_response(
+                        error_message='User not found',
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        errors={'userId': ['User not found']}
+                    )
+                
+                serializer = UserCompatibilitySerializer(target_user, context={'request': request})
+            else:
+                # Get current user's profile
+                serializer = UserCompatibilitySerializer(request.user, context={'request': request})
+            
             # Return same format as profilecached - direct user data, no wrapper
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
@@ -892,27 +923,52 @@ class PersonalRepresentativeView(APIView):
     def post(self, request):
         """
         POST /api/v1/personal/representative
-        New format: Update representative with body containing representative and representativeBy.
+        Set representativeBy: Search for a valid representative code in other users and set it as representativeBy.
+        Supports both query parameter and request body:
+        - Query: ?request=ABC12345
+        - Body: { "representative": "ABC12345" } or { "representativeBy": "ABC12345" }
         """
         try:
-            serializer = RepresentativeRequestSerializer(data=request.data)
-            if not serializer.is_valid():
+            # First check query parameter (for compatibility with GET method)
+            representative_code = request.query_params.get('request', '').strip()
+            
+            # If not in query, check request body
+            if not representative_code:
+                serializer = RepresentativeRequestSerializer(data=request.data)
+                if not serializer.is_valid():
+                    return create_error_response(
+                        error_message='Validation error',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors=serializer.errors
+                    )
+                
+                validated_data = serializer.validated_data
+                representative_code = validated_data.get('representative', '') or validated_data.get('representativeBy', '')
+            
+            if not representative_code:
                 return create_error_response(
-                    error_message='Validation error',
+                    error_message='Representative code is required. Provide it in query parameter (?request=CODE) or request body ({"representative": "CODE"})',
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    errors=serializer.errors
+                    errors={'representative': ['Representative code is required']}
                 )
             
-            validated_data = serializer.validated_data
-            representative = validated_data.get('representative', '')
-            representative_by = validated_data.get('representativeBy', '')
+            # Search for a user with this representative code
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
             
+            referrer_user = User.objects.filter(representative=representative_code).exclude(id=request.user.id).first()
+            
+            if not referrer_user:
+                return create_error_response(
+                    error_message='Invalid representative code. No user found with this code.',
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    errors={'representative': ['Invalid representative code']}
+                )
+            
+            # Set representativeBy for current user
             user = request.user
-            if representative:
-                user.representative = representative
-            if representative_by:
-                user.representative_by = representative_by
-            user.save()
+            user.representative_by = representative_code
+            user.save(update_fields=['representative_by'])
             
             response_serializer = UserCompatibilitySerializer(user, context={'request': request})
             return create_success_response(data=response_serializer.data, messages=[])
