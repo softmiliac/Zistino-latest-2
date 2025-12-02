@@ -36,21 +36,21 @@ class RequestRoleRequestSerializer(serializers.Serializer):
 
 class RepresentativeRequestSerializer(serializers.Serializer):
     """
-    Request serializer for updating representative.
+    Request serializer for setting representativeBy (referral code).
     
     Fields:
-    - representative: Name of the representative person (e.g., "John Doe")
-    - representativeBy: Name of the company/organization that the user is represented by (e.g., "ABC Company")
+    - representative: Representative code to search for and set as representativeBy (e.g., "ABC12345")
+    - representativeBy: Alternative field name for representative code (same as representative)
     """
     representative = serializers.CharField(
         required=False, 
         allow_blank=True,
-        help_text='Name of the representative person (e.g., "John Doe" or "new represent")'
+        help_text='Representative code to search for and set as representativeBy (e.g., "ABC12345")'
     )
     representativeBy = serializers.CharField(
         required=False, 
         allow_blank=True,
-        help_text='Name of the company/organization that the user is represented by (e.g., "ABC Company")'
+        help_text='Alternative field name for representative code (same as representative)'
     )
 
 
