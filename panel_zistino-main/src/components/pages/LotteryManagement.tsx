@@ -34,7 +34,7 @@ const LotteryManagement: FC = () => {
     const [selectedLotteryId, setSelectedLotteryId] = useState<any>("");
     const [eligibleDriversModalVisible, setEligibleDriversModalVisible] = useState(false);
     const [selectedLotteryForEligibleDrivers, setSelectedLotteryForEligibleDrivers] = useState<string>("");
-    const [minPointsFilter, setMinPointsFilter] = useState<number>(0);
+    const [minPointsFilter, setMinPointsFilter] = useState<number>(1);
 
     const { t } = useTranslation();
     const queryClient = useQueryClient();
@@ -417,10 +417,13 @@ const LotteryManagement: FC = () => {
                     <label className="block mb-2">{t("min_points") || "حداقل امتیاز"}:</label>
                     <Input
                         type="number"
-                        min={0}
+                        min={1}
                         value={minPointsFilter}
-                        onChange={(e) => setMinPointsFilter(parseInt(e.target.value) || 0)}
-                        placeholder="0"
+                        onChange={(e) => {
+                            const value = parseInt(e.target.value) || 1;
+                            setMinPointsFilter(value < 1 ? 1 : value);
+                        }}
+                        placeholder="1"
                     />
                 </div>
                 {loadingEligibleDrivers ? (
