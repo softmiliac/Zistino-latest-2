@@ -5,6 +5,7 @@ import { HiPlusSm, HiPencil, HiDocumentSearch, HiCurrencyDollar, HiPhone } from 
 
 import {
   useCreateAllDriverDelivery,
+  useCreateDriverDelivery,
   Button,
   Drawer,
   Input,
@@ -200,72 +201,114 @@ const CollectionRequest: FC = () => {
   const { data: users } = useDriversAll();
   const { data: allZone } = useZoneAll();
 
-  const createDriverDelivery = useCreateAllDriverDelivery();
+  const createDriverDelivery = useCreateDriverDelivery();
   const createTelephoneRequest = useCreateTelephoneRequest();
 
   const createFormik = useFormik({
     initialValues: {
       phoneNumber: "",
       address: "",
-      plate: "",
-      title: "",
-      firstName: "",
-      lastName: "",
       deliveryUserId: "",
-      setUserId: "",
       description: "",
       deliveryDate: "",
-      zoneId: 0,
-      status: 2,
+      zoneId: "",
+      status: 0,
     },
     validateOnChange: false,
     validateOnBlur: false,
     enableReinitialize: false,
     onSubmit: (values: any) => {
+      // Validate required fields
+      if (!values.phoneNumber) {
+        errorAlert({ title: t("phone_number_required") || "شماره تلفن الزامی است" });
+        return;
+      }
+      
+      // Format deliveryDate properly
+      let deliveryDateFormatted = null;
+      if (values.deliveryDate) {
+        try {
+          let dateToFormat;
+          if (values.deliveryDate?.toDate) {
+            dateToFormat = values.deliveryDate.toDate();
+          } else if (values.deliveryDate instanceof Date) {
+            dateToFormat = values.deliveryDate;
+          } else if (typeof values.deliveryDate === 'string') {
+            dateToFormat = new Date(values.deliveryDate);
+          } else {
+            dateToFormat = values.deliveryDate;
+          }
+          
+          if (dateToFormat && !isNaN(dateToFormat.getTime())) {
+            deliveryDateFormatted = moment(dateToFormat).utc().format("YYYY-MM-DDTHH:mm:ss[Z]");
+          }
+        } catch (e) {
+          console.error("Error formatting deliveryDate:", e);
+          // If formatting fails, use current date/time
+          deliveryDateFormatted = moment().utc().format("YYYY-MM-DDTHH:mm:ss[Z]");
+        }
+      }
+      
+      // Generate unique email and username if phoneNumber is provided
+      const phoneNumber = values.phoneNumber.trim();
+      const phoneDigits = phoneNumber.replace(/[^0-9]/g, '');
+      const timestamp = Date.now();
+      const uniqueEmail = `${phoneDigits}_${timestamp}@zistino.p.com`;
+      const userName = phoneDigits || `user_${timestamp}`;
+      
+      // Use direct driverdelivery/create endpoint
+      // This endpoint only creates delivery without creating user
       const finalValues: any = {
-        delivery: {
-          userId: "00000000-0000-0000-0000-000000000000",
-          deliveryUserId: values.deliveryUserId,
-          zoneId: values.zoneId,
-          deliveryDate: moment(
-            values.deliveryDate?.toDate?.().toString()
-          ).format("YYYY-MM-DDTHH:mm"),
-          status: values.status,
-          setUserId: currentUser?.id,
-          description: values.description,
-        },
-        address: {
-          phoneNumber: values.phoneNumber,
-          address: values.address,
-          plate: values.plate,
-          title: values.title,
-          id: 0,
-          userId: "00000000-0000-0000-0000-000000000000",
-          latitude: 0,
-          longitude: 0,
-          description: values.plate,
-        },
-        userInfo: {
-          phoneNumber: values.phoneNumber,
-          email: values.phoneNumber + "@p.com",
-          firstName: values.firstName,
-          lastName: values.lastName,
-          userName: values.phoneNumber,
-          password: "123456",
-          confirmPassword: "123456",
-          birthdate: "1998-11-14T18:29:48.877Z",
-          codeMeli: "",
-        },
+        phoneNumber: phoneNumber,
+        address: values.address || "",
+        deliveryUserId: values.deliveryUserId || null,
+        zoneId: values.zoneId ? parseInt(values.zoneId.toString()) : 0,
+        deliveryDate: deliveryDateFormatted,
+        status: values.status || 0,
+        description: values.description || "",
+        orderId: "0", // Will create a simple order if "0"
       };
-      values.setUserId = currentUser?.id;
+      
       createDriverDelivery
         .mutateAsync(finalValues)
         .then(() => {
           document.getElementById("create")?.click();
           createFormik.resetForm();
+          successAlert({ title: t("request_created") || "درخواست با موفقیت ایجاد شد" });
         })
         .catch((err) => {
-          /*errorAlert({ title: err?.message })*/
+          console.error("Error creating delivery:", err);
+          let errorMessage = t("error_occurred") || "خطایی رخ داد";
+          
+          if (err?.response?.data) {
+            const errorData = err.response.data;
+            // Try to get error message from different possible locations
+            if (errorData.messages && errorData.messages.length > 0) {
+              errorMessage = errorData.messages[0];
+            } else if (errorData.error_message) {
+              errorMessage = errorData.error_message;
+            } else if (errorData.errors) {
+              // Format validation errors
+              const errorKeys = Object.keys(errorData.errors);
+              if (errorKeys.length > 0) {
+                const firstError = errorData.errors[errorKeys[0]];
+                if (Array.isArray(firstError)) {
+                  errorMessage = firstError[0];
+                } else if (typeof firstError === 'object') {
+                  const nestedKey = Object.keys(firstError)[0];
+                  errorMessage = Array.isArray(firstError[nestedKey]) ? firstError[nestedKey][0] : firstError[nestedKey];
+                } else {
+                  errorMessage = firstError;
+                }
+              }
+            } else if (errorData.detail) {
+              errorMessage = errorData.detail;
+            }
+          } else if (err?.message) {
+            errorMessage = err.message;
+          }
+          
+          errorAlert({ title: errorMessage });
         });
     },
   });
@@ -412,25 +455,12 @@ const CollectionRequest: FC = () => {
           }}
         >
           <Input
-            label={t("firstname")}
-            name="firstName"
-            onChange={createFormik.handleChange}
-            value={createFormik.values.firstName}
-            error={createFormik.errors.firstName}
-          />
-          <Input
-            label={t("lastname")}
-            name="lastName"
-            onChange={createFormik.handleChange}
-            value={createFormik.values.lastName}
-            error={createFormik.errors.lastName}
-          />
-          <Input
             label={t("phone_number")}
             name="phoneNumber"
             onChange={createFormik.handleChange}
             value={createFormik.values.phoneNumber}
             error={createFormik.errors.phoneNumber}
+            required
           />
           <Input
             label={t("address")}
@@ -438,20 +468,7 @@ const CollectionRequest: FC = () => {
             onChange={createFormik.handleChange}
             value={createFormik.values.address}
             error={createFormik.errors.address}
-          />
-          <Input
-            label={t("plate_address")}
-            name="plate"
-            onChange={createFormik.handleChange}
-            value={createFormik.values.plate}
-            error={createFormik.errors.plate}
-          />
-          <Input
-            label={t("title_address")}
-            name="title"
-            onChange={createFormik.handleChange}
-            value={createFormik.values.title}
-            error={createFormik.errors.title}
+            required
           />
           <Select
             label={t("driver")}
