@@ -1,15 +1,13 @@
 import { FC, useState } from "react";
-import { HiStar, HiCurrencyDollar, HiUserGroup } from "react-icons/hi";
+import { HiStar, HiCurrencyDollar } from "react-icons/hi";
 import { useTranslation } from "react-i18next";
 import { ColumnsType } from "antd/lib/table";
-import { Tabs, Card, Tag } from "antd";
+import { Tabs, Tag } from "antd";
 
 import {
     ProTable,
     useLotteryWinners,
     usePointsSearch,
-    useMyReferralCode,
-    useMyReferrals,
 } from "../../";
 
 const { TabPane } = Tabs;
@@ -23,8 +21,6 @@ const Lottery: FC = () => {
 
     const { data: winners, isLoading: loadingWinners } = useLotteryWinners();
     const { data: pointsHistory, isLoading: loadingHistory } = usePointsSearch(page, perPage);
-    const { data: referralCode, isLoading: loadingCode } = useMyReferralCode();
-    const { data: myReferrals, isLoading: loadingReferrals } = useMyReferrals();
 
 
 
@@ -69,13 +65,17 @@ const Lottery: FC = () => {
             render: (value) => value || "-",
         },
         {
-            title: t("amount"),
-            dataIndex: "amount",
-            render: (value) => (
-                <Tag color={value > 0 ? "green" : "red"}>
-                    {value > 0 ? "+" : ""}{value} {t("points")}
-                </Tag>
-            ),
+            title: t("amount") || "مقدار",
+            dataIndex: "currentBalance",
+            render: (value, record) => {
+                // Use currentBalance if available, otherwise fallback to balanceAfter
+                const balance = record.currentBalance !== undefined ? record.currentBalance : record.balanceAfter;
+                return (
+                    <Tag color="green">
+                        {balance || 0} {t("points")}
+                    </Tag>
+                );
+            },
         },
         {
             title: t("description"),
@@ -85,35 +85,6 @@ const Lottery: FC = () => {
         },
     ];
 
-    const referralsColumns: ColumnsType<any> = [
-        {
-            title: t("user_name"),
-            dataIndex: "userName",
-            render: (value) => value || "-",
-        },
-        {
-            title: t("referral_date"),
-            dataIndex: "referralDate",
-            render: (value) => value ? new Date(value).toLocaleDateString() : "-",
-        },
-        {
-            title: t("status"),
-            dataIndex: "status",
-            render: (value) => {
-                const statusMap: { [key: string]: string } = {
-                    "pending": t("pending"),
-                    "completed": t("completed"),
-                    "awarded": t("awarded"),
-                    "active": t("active"),
-                };
-                return (
-                    <Tag color={value === "completed" || value === "awarded" ? "green" : value === "pending" ? "orange" : "default"}>
-                        {statusMap[value] || value}
-                    </Tag>
-                );
-            },
-        },
-    ];
 
     return (
         <>
@@ -122,19 +93,6 @@ const Lottery: FC = () => {
                     {t("lottery")}
                 </h2>
             </div>
-
-            {/* Referral Code Card */}
-            {referralCode?.data?.code && (
-                <Card className="mb-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-gray-600 dark:text-gray-400">{t("my_referral_code")}</p>
-                            <h3 className="text-xl font-mono font-bold">{referralCode.data.code}</h3>
-                        </div>
-                        <HiUserGroup className="text-4xl text-blue-500" />
-                    </div>
-                </Card>
-            )}
 
             <Tabs activeKey={activeTab} onChange={setActiveTab} className="mt-6">
                 {/* Winners Tab */}
@@ -200,46 +158,18 @@ const Lottery: FC = () => {
                                         referredName: transaction.referredName || null,
                                     }))
                             }
-                            configData={pointsHistory ? { ...pointsHistory, totalCount: pointsHistory.total || pointsHistory.data?.length || 0 } : null}
+                            configData={pointsHistory ? {
+                                ...pointsHistory,
+                                totalCount: pointsHistory.total || 0,
+                                currentPage: pointsHistory.pageNumber || page,
+                                totalPages: pointsHistory.total ? Math.ceil(pointsHistory.total / (pointsHistory.pageSize || perPage)) : 0,
+                                pageSize: pointsHistory.pageSize || perPage,
+                            } : null}
                             page={page}
                             perPage={perPage}
                             setPage={setPage}
                             setPerPage={setPerPage}
                             notHavePaging={false}
-                        />
-                    )}
-                </TabPane>
-
-                {/* My Referrals Tab */}
-                <TabPane
-                    tab={
-                        <span>
-                            <HiUserGroup className="inline-block mr-2" />
-                            {t("my_referrals")}
-                        </span>
-                    }
-                    key="referrals"
-                >
-                    {loadingReferrals ? (
-                        <div>{t("loading")}</div>
-                    ) : (
-                        <ProTable
-                            columns={referralsColumns}
-                            dataSource={Array.isArray(myReferrals?.items) ? myReferrals.items.map((referral: any) => ({
-                                ...referral,
-                                userName: referral.referredName || referral.userName,
-                                referralDate: referral.createdAt || referral.referralDate,
-                            })) : Array.isArray(myReferrals?.data) ? myReferrals.data.map((referral: any) => ({
-                                ...referral,
-                                userName: referral.referredName || referral.userName,
-                                referralDate: referral.createdAt || referral.referralDate,
-                            })) : []}
-                            configData={myReferrals ? { ...myReferrals, totalCount: myReferrals.total || myReferrals.data?.length || 0 } : null}
-                            page={page}
-                            perPage={perPage}
-                            setPage={setPage}
-                            setPerPage={setPerPage}
-                            notHavePaging={true}
                         />
                     )}
                 </TabPane>
