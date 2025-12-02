@@ -38,6 +38,7 @@ class PointTransactionSerializer(serializers.ModelSerializer):
     transactionType = serializers.CharField(source='transaction_type', read_only=True)
     referenceId = serializers.CharField(source='reference_id', allow_blank=True, required=False)
     balanceAfter = serializers.IntegerField(source='balance_after', read_only=True)
+    currentBalance = serializers.SerializerMethodField()  # Current balance from UserPoints
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     referredName = serializers.SerializerMethodField()
 
@@ -45,7 +46,7 @@ class PointTransactionSerializer(serializers.ModelSerializer):
         model = PointTransaction
         fields = [
             'id', 'userId', 'userPhone', 'userName', 'amount', 'transactionType',
-            'source', 'referenceId', 'description', 'balanceAfter', 'createdAt', 'referredName'
+            'source', 'referenceId', 'description', 'balanceAfter', 'currentBalance', 'createdAt', 'referredName'
         ]
         read_only_fields = ['id', 'createdAt']
     
@@ -56,6 +57,15 @@ class PointTransactionSerializer(serializers.ModelSerializer):
             return name if name else obj.user.phone_number
         return None
 
+    def get_currentBalance(self, obj):
+        """Get current balance from UserPoints model."""
+        try:
+            if obj.user and hasattr(obj.user, 'user_points') and obj.user.user_points:
+                return obj.user.user_points.balance
+            return 0
+        except Exception:
+            return 0
+    
     def get_referredName(self, obj):
         """Get referred person's name for referral transactions."""
         try:
