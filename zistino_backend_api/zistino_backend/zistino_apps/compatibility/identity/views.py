@@ -553,88 +553,299 @@ class IdentityRegisterWithPhoneCallView(APIView):
             
             # Check if phone number already exists (if provided)
             phone_number = user_info.get('phoneNumber', '').strip()
-            if phone_number and User.objects.filter(phone_number=phone_number).exists():
-                return create_error_response(
-                    error_message='Phone number is already registered.',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    errors={'userInfo': {'phoneNumber': ['Phone number is already registered.']}}
-                )
+            user = None
             
-            # Determine if user is driver based on appType
-            app_type = validated_data.get('appType', 'customer').lower()
-            is_driver = (app_type == 'driver')
-            
-            # Create user
-            username = phone_number if phone_number else user_info.get('userName')
-            if not phone_number:
-                phone_number = f'+989{str(uuid.uuid4().int)[:9]}'
-            
-            # Get first_name and last_name, use defaults if empty
-            first_name = user_info.get('firstName', '').strip()
-            last_name = user_info.get('lastName', '').strip()
-            
-            # If firstName or lastName is empty, use phoneNumber or userName as fallback
-            if not first_name:
-                first_name = phone_number or user_info.get('userName', '') or 'کاربر'
-            if not last_name:
-                last_name = phone_number or user_info.get('userName', '') or ''
-            
-            user = User.objects.create_user(
-                username=username,
-                email=user_info.get('email'),
-                password=user_info.get('password'),
-                phone_number=phone_number,
-                first_name=first_name,
-                last_name=last_name,
-                is_active=False,
-                email_confirmed=False,
-                is_driver=is_driver  # Set based on appType
-            )
-            
-            # Set optional fields
-            if user_info.get('companyName'):
-                user.company_name = user_info.get('companyName')
-            if user_info.get('vatNumber'):
-                user.vat_number = user_info.get('vatNumber')
-            if user_info.get('representative'):
-                user.representative = user_info.get('representative')
-            if user_info.get('sheba'):
-                user.sheba = user_info.get('sheba')
-            if user_info.get('bankname'):
-                user.bank_name = user_info.get('bankname')
-            if user_info.get('birthdate'):
-                birthdate = user_info.get('birthdate')
-                if hasattr(birthdate, 'date'):
-                    user.birth_date = birthdate.date()
-                else:
-                    user.birth_date = birthdate
-            if user_info.get('codeMeli'):
-                user.national_id = user_info.get('codeMeli')
-            if user_info.get('representativeBy'):
-                user.representative_by = user_info.get('representativeBy')
-            
-            user.save()
-            
-            # Assign role groups based on appType
-            from django.contrib.auth.models import Group
-            if is_driver:
-                driver_group, _ = Group.objects.get_or_create(name='Driver')
-                user.groups.add(driver_group)
+            # If delivery is provided (React panel use case), try to reuse existing user
+            # Otherwise (Flutter apps use case), create new user or return error
+            if delivery:
+                # React panel: Try to find existing user by phone number to avoid duplicates
+                if phone_number:
+                    try:
+                        user = User.objects.get(phone_number=phone_number)
+                        # User exists, update if needed
+                        if user_info.get('firstName'):
+                            user.first_name = user_info.get('firstName')
+                        if user_info.get('lastName'):
+                            user.last_name = user_info.get('lastName')
+                        user.save()
+                    except User.DoesNotExist:
+                        pass
             else:
-                customer_group, _ = Group.objects.get_or_create(name='Customer')
-                user.groups.add(customer_group)
+                # Flutter apps: Check if phone number already exists and return error
+                if phone_number and User.objects.filter(phone_number=phone_number).exists():
+                    return create_error_response(
+                        error_message='Phone number is already registered.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'userInfo': {'phoneNumber': ['Phone number is already registered.']}}
+                    )
             
-            # TODO: Create address and delivery records if provided
-            # For now, we'll just create the user
+            # If user doesn't exist, create new user
+            if not user:
+                # Check if email already exists
+                if User.objects.filter(email=user_info.get('email')).exists():
+                    return create_error_response(
+                        error_message='Email is already registered.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'userInfo': {'email': ['Email is already registered.']}}
+                    )
+                
+                # Check if username already exists
+                if User.objects.filter(username=user_info.get('userName')).exists():
+                    return create_error_response(
+                        error_message='Username is already taken.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'userInfo': {'userName': ['Username is already taken.']}}
+                    )
+                
+                # Determine if user is driver based on appType
+                app_type = validated_data.get('appType', 'customer').lower()
+                is_driver = (app_type == 'driver')
+                
+                # Create user
+                username = phone_number if phone_number else user_info.get('userName')
+                if not phone_number:
+                    phone_number = f'+989{str(uuid.uuid4().int)[:9]}'
+                
+                # Get first_name and last_name, use defaults if empty
+                first_name = user_info.get('firstName', '').strip()
+                last_name = user_info.get('lastName', '').strip()
+                
+                # If firstName or lastName is empty, use phoneNumber or userName as fallback
+                if not first_name:
+                    first_name = phone_number or user_info.get('userName', '') or 'کاربر'
+                if not last_name:
+                    last_name = phone_number or user_info.get('userName', '') or ''
+                
+                user = User.objects.create_user(
+                    username=username,
+                    email=user_info.get('email'),
+                    password=user_info.get('password'),
+                    phone_number=phone_number,
+                    first_name=first_name,
+                    last_name=last_name,
+                    is_active=False,
+                    email_confirmed=False,
+                    is_driver=is_driver  # Set based on appType
+                )
+                
+                # Set optional fields
+                if user_info.get('companyName'):
+                    user.company_name = user_info.get('companyName')
+                if user_info.get('vatNumber'):
+                    user.vat_number = user_info.get('vatNumber')
+                if user_info.get('representative'):
+                    user.representative = user_info.get('representative')
+                if user_info.get('sheba'):
+                    user.sheba = user_info.get('sheba')
+                if user_info.get('bankname'):
+                    user.bank_name = user_info.get('bankname')
+                if user_info.get('birthdate'):
+                    birthdate = user_info.get('birthdate')
+                    if hasattr(birthdate, 'date'):
+                        user.birth_date = birthdate.date()
+                    else:
+                        user.birth_date = birthdate
+                if user_info.get('codeMeli'):
+                    user.national_id = user_info.get('codeMeli')
+                if user_info.get('representativeBy'):
+                    user.representative_by = user_info.get('representativeBy')
+                
+                user.save()
+                
+                # Assign role groups based on appType
+                from django.contrib.auth.models import Group
+                if is_driver:
+                    driver_group, _ = Group.objects.get_or_create(name='Driver')
+                    user.groups.add(driver_group)
+                else:
+                    customer_group, _ = Group.objects.get_or_create(name='Customer')
+                    user.groups.add(customer_group)
             
-            # Return simplified response matching old Swagger format
+            # Create address if provided
+            address_obj = None
+            if address:
+                try:
+                    from zistino_apps.users.models import Address
+                    from decimal import Decimal
+                    
+                    address_obj = Address.objects.create(
+                        user=user,
+                        address=address.get('address', ''),
+                        phone_number=address.get('phoneNumber') or phone_number,
+                        full_name=address.get('fullName', ''),
+                        latitude=Decimal(str(address.get('latitude', 0))) if address.get('latitude') else None,
+                        longitude=Decimal(str(address.get('longitude', 0))) if address.get('longitude') else None,
+                        description=address.get('description', ''),
+                        plate=address.get('plate', ''),
+                        title=address.get('title', ''),
+                        city=address.get('city', ''),
+                        province=address.get('province', ''),
+                        country=address.get('country', ''),
+                        zip_code=address.get('zipCode', ''),
+                        unit=address.get('unit', ''),
+                        company_name=address.get('companyName', ''),
+                        company_number=address.get('companyNumber', ''),
+                        vat_number=address.get('vatNumber', ''),
+                        fax=address.get('fax', ''),
+                        website=address.get('website') or None,
+                        email=address.get('email', ''),
+                    )
+                except Exception as e:
+                    import traceback
+                    print(f"Error creating address: {str(e)}")
+                    print(traceback.format_exc())
+                    # Continue without address if creation fails
+                    address_obj = None
+            
+            # Create delivery if provided
+            delivery_id = None
+            if delivery:
+                from zistino_apps.deliveries.models import Delivery
+                from zistino_apps.orders.models import Order
+                from decimal import Decimal
+                
+                # Get or create order if orderId is provided
+                order_obj = None
+                order_id = delivery.get('orderId', '0')
+                if order_id and order_id != '0' and order_id != '':
+                    try:
+                        order_obj = Order.objects.get(id=order_id)
+                    except (Order.DoesNotExist, ValueError):
+                        pass
+                
+                # If no order provided, create a minimal order for the user
+                if not order_obj:
+                    try:
+                        order_obj = Order.objects.create(
+                            user=user,
+                            total_price=0,
+                            status='pending',
+                            address1=delivery.get('address') or (address_obj.address if address_obj else ''),
+                            phone1=delivery.get('phoneNumber') or phone_number,
+                            user_full_name=f"{user.first_name} {user.last_name}".strip() or phone_number,
+                            user_phone_number=phone_number,
+                            latitude=Decimal(str(delivery.get('latitude', 0))) if delivery.get('latitude') else None,
+                            longitude=Decimal(str(delivery.get('longitude', 0))) if delivery.get('longitude') else None,
+                            zone_id=delivery.get('zoneId') if delivery.get('zoneId') else None,
+                        )
+                    except Exception as e:
+                        # If order creation fails, we can't create delivery
+                        return create_error_response(
+                            error_message=f'Failed to create order: {str(e)}',
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            errors={'delivery': {'order': [str(e)]}}
+                        )
+                
+                # Get driver if deliveryUserId is provided
+                driver_obj = None
+                delivery_user_id = delivery.get('deliveryUserId')
+                if delivery_user_id:
+                    try:
+                        driver_obj = User.objects.get(id=delivery_user_id)
+                    except (User.DoesNotExist, ValueError):
+                        pass
+                
+                # If no driver provided, use a default driver or the user themselves
+                if not driver_obj:
+                    # Try to find any driver user, or use the current user
+                    driver_obj = user if user.is_driver else None
+                    if not driver_obj:
+                        # Try to get first available driver
+                        try:
+                            driver_obj = User.objects.filter(is_driver=True).first()
+                        except Exception:
+                            pass
+                
+                # Driver is required for Delivery model
+                if not driver_obj:
+                    return create_error_response(
+                        error_message='Driver is required for delivery. Please provide deliveryUserId.',
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        errors={'delivery': {'deliveryUserId': ['Driver is required']}}
+                    )
+                
+                # Map status number to status string
+                status_num = delivery.get('status', 0)
+                status_map = {
+                    0: 'assigned',
+                    1: 'in_progress',
+                    2: 'completed',
+                    3: 'cancelled'
+                }
+                status_str = status_map.get(status_num, 'assigned')
+                
+                # Create delivery
+                try:
+                    delivery_address = delivery.get('address') or (address_obj.address if address_obj else '') or phone_number
+                    delivery_phone = delivery.get('phoneNumber') or phone_number
+                    
+                    # Check if status_number column exists
+                    from zistino_apps.compatibility.driverdelivery.views import _status_number_column_exists
+                    status_number_exists = _status_number_column_exists()
+                    
+                    # Prepare delivery data
+                    delivery_data = {
+                        'driver': driver_obj,
+                        'order': order_obj,
+                        'address': delivery_address,
+                        'phone_number': delivery_phone,
+                        'status': status_str,
+                        'description': delivery.get('description', ''),
+                    }
+                    
+                    # Add optional fields
+                    if delivery.get('latitude'):
+                        delivery_data['latitude'] = Decimal(str(delivery.get('latitude', 0)))
+                    if delivery.get('longitude'):
+                        delivery_data['longitude'] = Decimal(str(delivery.get('longitude', 0)))
+                    if delivery.get('deliveryDate'):
+                        delivery_data['delivery_date'] = delivery.get('deliveryDate')
+                    
+                    # Only add status_number if column exists
+                    if status_number_exists:
+                        delivery_data['status_number'] = status_num
+                    
+                    # Create delivery
+                    delivery_obj = Delivery.objects.create(**delivery_data)
+                    
+                    # Set zone_id if provided (using direct assignment if column exists)
+                    if delivery.get('zoneId'):
+                        try:
+                            delivery_obj.zone_id = delivery.get('zoneId')
+                            delivery_obj.save(update_fields=['zone_id'])
+                        except Exception as zone_error:
+                            # Zone_id column might not exist, ignore
+                            print(f"Warning: Could not set zone_id: {str(zone_error)}")
+                            pass
+                    
+                    delivery_id = delivery_obj.id
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    print(f"Error creating delivery: {str(e)}")
+                    print(f"Traceback: {error_trace}")
+                    return create_error_response(
+                        error_message=f'Failed to create delivery: {str(e)}',
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        errors={'delivery': [str(e)]}
+                    )
+            
+            # Return response with delivery ID if created
+            response_data = str(user.id)
+            if delivery_id:
+                response_data = str(delivery_id)
+            
             return Response({
                 'messages': [],
                 'succeeded': True,
-                'data': str(user.id)
+                'data': response_data
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"Error in register-with-phonecall: {str(e)}")
+            print(f"Traceback: {error_trace}")
             return create_error_response(
                 error_message=f'An error occurred while registering user: {str(e)}',
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
