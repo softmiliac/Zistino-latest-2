@@ -200,7 +200,7 @@ class CustomerPointsViewSet(viewsets.ViewSet):
         import uuid
         
         # Prefetch referral data to avoid N+1 queries
-        qs = PointTransaction.objects.filter(user=request.user).order_by('-created_at')[:100]
+        qs = PointTransaction.objects.filter(user=request.user).select_related('user__user_points').order_by('-created_at')[:100]
         
         # Get referral IDs from the queryset before evaluating it
         # Filter for valid UUIDs only
@@ -1392,26 +1392,48 @@ class AdminLotteryViewSet(viewsets.ModelViewSet):
         lottery = self.get_object()
         
         # Get minimum points threshold from query params (optional, defaults to 1)
+        # Minimum points must be at least 1 to exclude drivers with 0 points
         min_points = request.query_params.get('min_points', 1)
         try:
             min_points = int(min_points)
+            # Ensure min_points is at least 1 (drivers with 0 points should not be eligible)
+            if min_points < 1:
+                min_points = 1
         except (ValueError, TypeError):
             min_points = 1
         
-        # Get all active drivers and annotate with their points balance (defaulting to 0 if no UserPoints record)
-        eligible_drivers = User.objects.filter(
-            is_driver=True,
-            is_active=True,
-            is_active_driver=True
-        ).annotate(
+        # Get all drivers that have points > 0 (relaxed criteria for lottery eligibility)
+        # We only require: is_driver=True
+        # If a driver has points, they should be eligible for lottery regardless of is_active or is_active_driver
+        all_drivers = User.objects.filter(
+            is_driver=True
+        )
+        
+        logger.info(f"Total drivers with is_driver=True: {all_drivers.count()}")
+        
+        # Annotate with points balance
+        eligible_drivers = all_drivers.annotate(
             points_balance=Case(
                 When(user_points__isnull=False, then=F('user_points__balance')),
                 default=Value(0),
                 output_field=IntegerField()
             )
-        ).filter(
+        ).select_related('user_points').distinct()
+        
+        # Log all drivers with their points before filtering
+        logger.info("All drivers with points:")
+        for driver in eligible_drivers:
+            points = getattr(driver, 'points_balance', None)
+            if points is None:
+                points = driver.user_points.balance if hasattr(driver, 'user_points') and driver.user_points else 0
+            logger.info(f"Driver: {driver.phone_number} ({driver.first_name} {driver.last_name}), Points: {points}, is_active_driver: {getattr(driver, 'is_active_driver', None)}")
+        
+        # Filter by minimum points (only drivers with points > 0 should be eligible)
+        eligible_drivers = eligible_drivers.filter(
             points_balance__gte=min_points
-        ).select_related('user_points').distinct().order_by('-points_balance')
+        ).order_by('-points_balance')
+        
+        logger.info(f"Eligible drivers after filtering (points >= {min_points}): {eligible_drivers.count()}")
         
         # Serialize driver data
         drivers_data = []
@@ -1443,20 +1465,24 @@ class AdminLotteryViewSet(viewsets.ModelViewSet):
         lottery = self.get_object()
         
         # Get minimum points threshold from request (optional, defaults to 1)
+        # Minimum points must be at least 1 to exclude drivers with 0 points
         min_points = request.data.get('min_points', 1)
         try:
             min_points = int(min_points)
+            # Ensure min_points is at least 1 (drivers with 0 points should not be eligible)
+            if min_points < 1:
+                min_points = 1
         except (ValueError, TypeError):
             min_points = 1
         
         # Get eligible drivers (drivers with points >= min_points)
+        # We only require: is_driver=True
+        # If a driver has points, they should be eligible for lottery regardless of is_active or is_active_driver
         from zistino_apps.points.models import UserPoints
         from django.db.models import F, Case, When, IntegerField, Value
         
         eligible_drivers = User.objects.filter(
-            is_driver=True,
-            is_active=True,
-            is_active_driver=True
+            is_driver=True
         ).annotate(
             points_balance=Case(
                 When(user_points__isnull=False, then=F('user_points__balance')),
@@ -1724,7 +1750,7 @@ class AdminPointTransactionSearchView(APIView):
         keyword = serializer.validated_data.get('keyword', '').strip()
         source_filter = serializer.validated_data.get('source', '').strip()
         
-        qs = PointTransaction.objects.all().select_related('user').order_by('-created_at')
+        qs = PointTransaction.objects.all().select_related('user', 'user__user_points').order_by('-created_at')
         
         # Filter by source if provided
         if source_filter:
@@ -2190,35 +2216,68 @@ class AdminReferralSearchView(APIView):
     permission_classes = [IsAuthenticated, IsManager]
 
     def post(self, request):
-        """Search referrals with pagination and filters."""
+        """Search referrals with pagination and filters.
+        Now uses User.representative and User.representative_by instead of Referral model.
+        Shows users who have representativeBy set (were referred by someone).
+        """
+        
         serializer = ReferralSearchRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         page_number = serializer.validated_data.get('pageNumber', 1)
         page_size = serializer.validated_data.get('pageSize', 20)
         keyword = serializer.validated_data.get('keyword', '').strip()
-        status_filter = serializer.validated_data.get('status', '').strip()
+        status_filter = serializer.validated_data.get('status', '').strip()  # Not used for representative system
         
-        qs = Referral.objects.all().select_related('referrer', 'referred').order_by('-created_at')
+        # Get users who have representativeBy set (were referred by someone)
+        qs = User.objects.filter(representative_by__isnull=False).exclude(representative_by='').order_by('-created_at')
         
-        # Filter by status if provided
-        if status_filter:
-            qs = qs.filter(status=status_filter)
-        
-        # Filter by keyword (search in phone numbers, referral code)
+        # Filter by keyword (search in phone numbers, name, representative code, representativeBy)
         if keyword:
             qs = qs.filter(
-                Q(referrer__phone_number__icontains=keyword) |
-                Q(referred__phone_number__icontains=keyword) |
-                Q(referral_code__icontains=keyword)
+                Q(phone_number__icontains=keyword) |
+                Q(first_name__icontains=keyword) |
+                Q(last_name__icontains=keyword) |
+                Q(representative__icontains=keyword) |
+                Q(representative_by__icontains=keyword)
             )
+        
+        # Note: status_filter is not applicable for representative system
+        # But we keep it for backward compatibility
         
         start = (page_number - 1) * page_size
         end = start + page_size
         items = qs[start:end]
         
+        # Build response data matching the expected format
+        items_data = []
+        for user in items:
+            # Find the referrer user by representative code
+            referrer_user = None
+            if user.representative_by:
+                referrer_user = User.objects.filter(representative=user.representative_by).first()
+            
+            # Get referrer's representative code (the code they gave to others)
+            referrer_code = referrer_user.representative if referrer_user and referrer_user.representative else user.representative_by
+            
+            items_data.append({
+                'id': str(user.id),
+                'referrerId': str(referrer_user.id) if referrer_user else None,
+                'referrerPhone': referrer_user.phone_number if referrer_user else None,
+                'referrerName': f"{referrer_user.first_name} {referrer_user.last_name}".strip() if referrer_user else None,
+                'referredId': str(user.id),
+                'referredPhone': user.phone_number,
+                'referredName': f"{user.first_name} {user.last_name}".strip() or user.phone_number,
+                'referral_code': referrer_code,  # The representative code of the referrer
+                'status': 'completed',  # Always completed for representative system
+                'referrerPointsAwarded': False,  # Not applicable for representative system
+                'referredBonusAwarded': False,  # Not applicable for representative system
+                'completedAt': user.created_at.isoformat() if user.created_at else None,
+                'createdAt': user.created_at.isoformat() if user.created_at else None,
+            })
+        
         return Response({
-            'items': ReferralSerializer(items, many=True).data,
+            'items': items_data,
             'pageNumber': page_number,
             'pageSize': page_size,
             'total': qs.count(),
