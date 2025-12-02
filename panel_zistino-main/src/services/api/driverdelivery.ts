@@ -20,7 +20,7 @@ const driverdelivery = {
       keyword: keyword,
       status: searchValueTag,
     }).then((res) => res.data),
-  create: (data: IDriverDelivery) => post("/driverdelivery", data),
+  create: (data: IDriverDelivery) => post("/driverdelivery/", data),
   createAll: (data: IDriverDelivery) =>
     post("/identity/register-with-phonecall", data),
   delete: (id: string) =>
@@ -96,6 +96,7 @@ export const useCreateAllDriverDelivery = () => {
     {
       onSuccess: () => {
         queryClient.invalidateQueries("driverdelivery");
+        queryClient.invalidateQueries("driverdelivery-sp");
       },
     }
   );
