@@ -2339,11 +2339,16 @@ class ManagerDriverRouteView(APIView):
             ).order_by('created_at')
 
             # Get deliveries for this driver on this date
+            # Filter only deliveries with delivery_date (exclude None)
             deliveries = Delivery.objects.filter(
                 driver=driver,
+                delivery_date__isnull=False,
                 delivery_date__gte=date_start,
                 delivery_date__lte=date_end
             ).select_related('order', 'order__user')
+            
+            # Apply safe query to exclude status_number if column doesn't exist
+            deliveries = _apply_status_number_safe_query(deliveries)
 
             # Build response
             trips_data = []
@@ -2354,6 +2359,10 @@ class ManagerDriverRouteView(APIView):
             matched_deliveries = set()  # Track deliveries already matched to avoid duplicates
 
             for trip in trips:
+                # Skip if trip doesn't have created_at
+                if not trip.created_at:
+                    continue
+                
                 # Get location updates for this trip
                 locations = LocationUpdate.objects.filter(
                     trip=trip
@@ -2426,6 +2435,14 @@ class ManagerDriverRouteView(APIView):
                         else:
                             time_formatted = f"{seconds} second{'s' if seconds != 1 else ''}"
 
+                        # Format delivered_weight safely
+                        delivered_weight_str = "0.00"
+                        if delivery.delivered_weight is not None:
+                            try:
+                                delivered_weight_str = f"{float(delivery.delivered_weight):.2f}"
+                            except (ValueError, TypeError):
+                                delivered_weight_str = "0.00"
+                        
                         pickup_locations.append({
                             'deliveryId': str(delivery.id),
                             'customerAddress': delivery.address or '',
@@ -2436,25 +2453,49 @@ class ManagerDriverRouteView(APIView):
                             'departureTime': departure.created_at.isoformat(),
                             'timeSpentSeconds': int(time_spent),
                             'timeSpentFormatted': time_formatted,
-                            'deliveredWeight': f"{delivery.delivered_weight:.2f}" if delivery.delivered_weight else "0.00"
+                            'deliveredWeight': delivered_weight_str
                         })
                         
                         total_pickup_time += time_spent
                         total_pickups += 1
 
+                # Calculate end time safely
+                end_time = None
+                if trip.created_at and trip.duration:
+                    try:
+                        end_time = (trip.created_at + timedelta(seconds=trip.duration)).isoformat()
+                    except (TypeError, ValueError):
+                        pass
+                
+                # Calculate distance safely
+                distance_km = 0.0
+                if trip.distance:
+                    try:
+                        distance_km = float(trip.distance / 1000)  # Convert to km
+                    except (TypeError, ValueError):
+                        distance_km = 0.0
+                
+                # Calculate average speed safely
+                avg_speed = 0.0
+                if trip.average_speed:
+                    try:
+                        avg_speed = float(trip.average_speed)
+                    except (TypeError, ValueError):
+                        avg_speed = 0.0
+                
                 trips_data.append({
                     'tripId': trip.id,
-                    'startTime': trip.created_at.isoformat(),
-                    'endTime': (trip.created_at + timedelta(seconds=trip.duration)).isoformat() if trip.duration else None,
-                    'distance': float(trip.distance / 1000) if trip.distance else 0.0,  # Convert to km
-                    'duration': trip.duration,
-                    'averageSpeed': float(trip.average_speed) if trip.average_speed else 0.0,
+                    'startTime': trip.created_at.isoformat() if trip.created_at else None,
+                    'endTime': end_time,
+                    'distance': distance_km,
+                    'duration': trip.duration if trip.duration else 0,
+                    'averageSpeed': avg_speed,
                     'routePoints': route_points,
                     'pickupLocations': pickup_locations
                 })
 
-                total_distance += float(trip.distance / 1000) if trip.distance else 0.0
-                total_duration += trip.duration or 0
+                total_distance += distance_km
+                total_duration += trip.duration if trip.duration else 0
 
             # Calculate summary
             avg_pickup_time = total_pickup_time / total_pickups if total_pickups > 0 else 0
@@ -2474,10 +2515,14 @@ class ManagerDriverRouteView(APIView):
             })
         
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             logger.error(f"Error in ManagerDriverRouteView.post: {str(e)}")
-            logger.error(traceback.format_exc())
+            logger.error(error_trace)
+            print(f"Error in ManagerDriverRouteView.post: {str(e)}")
+            print(error_trace)
             return Response(
-                {'detail': f'An error occurred: {str(e)}'},
+                {'detail': f'An error occurred: {str(e)}', 'traceback': error_trace if request.user.is_staff else None},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
