@@ -322,33 +322,73 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             
             # Get driver (deliveryUserId or userId)
             driver_id = validated_data.get('deliveryUserId') or validated_data.get('userId')
-            if not driver_id:
-                return create_error_response(
-                    error_message='deliveryUserId or userId is required',
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    errors={'deliveryUserId': ['deliveryUserId or userId is required']}
-                )
+            driver = None
             
-            try:
-                driver = User.objects.get(id=driver_id)
-            except User.DoesNotExist:
+            if driver_id:
+                try:
+                    driver = User.objects.get(id=driver_id)
+                    # Check if user is a driver
+                    if not driver.is_driver:
+                        driver = None  # Reset if not a driver
+                except User.DoesNotExist:
+                    pass
+            
+            # If no driver provided or driver not found, try to get first available driver
+            if not driver:
+                try:
+                    driver = User.objects.filter(is_driver=True).first()
+                except Exception:
+                    pass
+            
+            # Driver is required for Delivery model
+            if not driver:
                 return create_error_response(
-                    error_message=f'User with ID "{driver_id}" not found.',
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    errors={'deliveryUserId': [f'User with ID "{driver_id}" not found.']}
+                    error_message='Driver is required. Please provide deliveryUserId or ensure at least one driver exists in the system.',
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    errors={'deliveryUserId': ['Driver is required. Please provide deliveryUserId or ensure at least one driver exists.']}
                 )
             
             # Get order (orderId is required for Delivery model)
             order_id = validated_data.get('orderId', '0')
             if not order_id or order_id == '0' or order_id == '':
-                # Try to get the first available order or create a placeholder
+                # Try to get the first available order
                 order = Order.objects.first()
                 if not order:
-                    return create_error_response(
-                        error_message='No orders available. Please create an order first.',
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'orderId': ['No orders available. Please create an order first.']}
-                    )
+                    # Create a minimal order for the delivery if no order exists
+                    # This allows React Panel to create deliveries without requiring existing orders
+                    try:
+                        # Get address and phone from request
+                        address_text = validated_data.get('address', '')
+                        phone_number = validated_data.get('phoneNumber', '')
+                        if not address_text:
+                            address_text = driver.phone_number if hasattr(driver, 'phone_number') else ''
+                        if not phone_number:
+                            phone_number = driver.phone_number if hasattr(driver, 'phone_number') else ''
+                        
+                        # Create a minimal order
+                        order = Order.objects.create(
+                            user=driver,  # Use driver as user for the order
+                            total_price=0,
+                            status='pending',
+                            address1=address_text,
+                            phone1=phone_number,
+                            user_full_name=f"{driver.first_name} {driver.last_name}".strip() or phone_number,
+                            user_phone_number=phone_number,
+                        )
+                        
+                        # Set zone_id if provided
+                        if validated_data.get('zoneId') and validated_data.get('zoneId') != 0:
+                            try:
+                                order.zone_id = validated_data.get('zoneId')
+                                order.save(update_fields=['zone_id'])
+                            except Exception:
+                                pass  # zone_id column might not exist
+                    except Exception as e:
+                        return create_error_response(
+                            error_message=f'Failed to create order: {str(e)}',
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            errors={'orderId': [f'Failed to create order: {str(e)}']}
+                        )
             else:
                 try:
                     # Try UUID first
@@ -1101,10 +1141,43 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             
             # Filter by status
             if validated_data.get('status') is not None:
-                status_map = {0: 'assigned', 1: 'in_progress', 2: 'completed', 3: 'cancelled'}
-                status_value = status_map.get(validated_data['status'])
-                if status_value:
-                    qs = qs.filter(status=status_value)
+                status_num = validated_data['status']
+                
+                # Map status numbers to status strings
+                # Standard status mapping (0-3)
+                status_map = {
+                    0: 'assigned', 
+                    1: 'in_progress', 
+                    2: 'completed', 
+                    3: 'cancelled'
+                }
+                
+                # Extended status mapping for frontend filters (12-16)
+                # These map to status_number field if it exists, otherwise to status string
+                extended_status_map = {
+                    12: 'in_progress',  # فعال (Active)
+                    13: 'completed',   # تمام شده‌ها (Completed)
+                    14: 'cancelled',   # لغو شده‌ها (Cancelled)
+                    16: 'assigned',    # دریافتی از راننده‌ها (Received from Drivers)
+                }
+                
+                # Check if status_number column exists
+                column_exists = _status_number_column_exists()
+                
+                if status_num in extended_status_map:
+                    # Use status_number if column exists, otherwise use status string
+                    if column_exists:
+                        qs = qs.filter(status_number=status_num)
+                    else:
+                        # Fallback to status string mapping
+                        status_value = extended_status_map.get(status_num)
+                        if status_value:
+                            qs = qs.filter(status=status_value)
+                elif status_num in status_map:
+                    # Standard status mapping (0-3)
+                    status_value = status_map.get(status_num)
+                    if status_value:
+                        qs = qs.filter(status=status_value)
             
             # Filter by date range
             if validated_data.get('fromDate'):
