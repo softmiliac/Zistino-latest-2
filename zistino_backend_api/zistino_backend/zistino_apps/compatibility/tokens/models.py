@@ -39,10 +39,10 @@ class RefreshToken(models.Model):
         return secrets.token_urlsafe(32)
     
     @classmethod
-    def create_for_user(cls, user, expiry_days=30):
-        """Create a refresh token for a user."""
+    def create_for_user(cls, user, expiry_minutes=3):
+        """Create a refresh token for a user (3 minutes for testing)."""
         token = cls.generate_token()
-        expires_at = timezone.now() + timedelta(days=expiry_days)
+        expires_at = timezone.now() + timedelta(minutes=expiry_minutes)
         return cls.objects.create(
             user=user,
             token=token,
