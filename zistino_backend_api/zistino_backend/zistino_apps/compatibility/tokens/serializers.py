@@ -58,9 +58,10 @@ class RefreshTokenRequestSerializer(serializers.Serializer):
     """
     Serializer for refreshing an access token.
     Matches old Swagger format: { "token": "...", "refreshToken": "..." }
+    Token can be provided in body or Authorization header.
     """
-    token = serializers.CharField(required=True, write_only=True)  # Current access token
-    refreshToken = serializers.CharField(required=True, write_only=True)  # Refresh token
+    token = serializers.CharField(required=False, write_only=True, allow_blank=True)  # Current access token (optional, can be in header)
+    refreshToken = serializers.CharField(required=True, write_only=True)  # Refresh token (required in body)
 
 
 class TokenDataSerializer(serializers.Serializer):
