@@ -246,15 +246,21 @@ SPECTACULAR_SETTINGS = {
 
 # CORS settings
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
+    "https://zistino-client.netlify.app",
     "https://zistino-latest-2.onrender.com",
+]
+
+# Add production Flutter Web origins from environment variabl
+cors_origins_env = config('CORS_ORIGINS', default='', cast=lambda v: [s.strip() for s in v.split(',') if s.strip()])
+if cors_origins_env:
+    CORS_ALLOWED_ORIGINS.extend(cors_origins_env)
+
+# Allow all ports and localhosts 
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost:\d+$",           
+    r"^http://127\.0\.0\.1:\d+$",        
+    r"^https://localhost:\d+$",          
+    r"^https://127\.0\.0\.1:\d+$",       
 ]
 
 # Allow all origins in development (for Swagger UI and testing)
