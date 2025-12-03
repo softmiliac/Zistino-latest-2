@@ -525,6 +525,15 @@ class TokensRefreshView(APIView):
     )
     def post(self, request):
         tenant = request.headers.get('tenant', 'root')
+        
+        # Get token from Authorization header or body
+        auth_header = request.headers.get('Authorization', '')
+        token_from_header = None
+        if auth_header.startswith('Bearer '):
+            token_from_header = auth_header.split(' ')[1]
+        elif auth_header.startswith('Token '):
+            token_from_header = auth_header.split(' ')[1]
+        
         serializer = RefreshTokenRequestSerializer(data=request.data)
         if not serializer.is_valid():
             errors = {}
@@ -536,7 +545,8 @@ class TokensRefreshView(APIView):
                 errors=errors
             )
         
-        token = serializer.validated_data['token']  # Current access token (may be used for validation)
+        # Get token from body or header (header takes priority)
+        token = serializer.validated_data.get('token') or token_from_header  # Current access token (optional, for validation)
         refresh_token = serializer.validated_data['refreshToken']
         
         try:
