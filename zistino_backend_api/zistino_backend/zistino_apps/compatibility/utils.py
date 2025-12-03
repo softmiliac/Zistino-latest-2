@@ -167,6 +167,6 @@ def generate_refresh_token() -> str:
 
 
 def calculate_refresh_token_expiry() -> datetime:
-    """Calculate refresh token expiry time (30 days from now)."""
-    return timezone.now() + timedelta(days=30)
+    """Calculate refresh token expiry time (3 minutes from now - for testing)."""
+    return timezone.now() + timedelta(minutes=3)
 
