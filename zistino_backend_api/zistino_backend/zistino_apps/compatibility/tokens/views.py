@@ -73,7 +73,7 @@ def generate_jwt_token(user, tenant='root'):
             'roles': str(roles),
             'cid': '0',
             'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/mobilephone': user.phone_number or '',
-            'exp': int((timezone.now() + timedelta(days=7)).timestamp())  # 7 days expiry
+            'exp': int((timezone.now() + timedelta(minutes=3)).timestamp())  # 3 minutes expiry (for testing)
         }
         
         token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
