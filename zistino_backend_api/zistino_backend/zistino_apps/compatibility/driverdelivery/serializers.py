@@ -163,8 +163,33 @@ class DriverDeliveryMyRequestsResponseSerializer(serializers.Serializer):
         return 0
     
     def get_vatNumber(self, obj):
-        """Return VAT number (if exists in order/user)."""
-        # This field might not be used, return empty string for now
+        """
+        Return VAT number field.
+        For driver delivery myRequests, Flutter expects this to contain
+        the driver's vehicle plate number (plateNum).
+        Strategy:
+        - If delivery has a driver, find an active vehicle for that user.
+        - Return its plate_num as string.
+        - If no vehicle/plate is found, return empty string.
+        """
+        try:
+            from zistino_apps.users.models import Vehicle
+        except Exception:
+            return ""
+
+        driver = getattr(obj, "driver", None)
+        if not driver:
+            return ""
+
+        # Prefer active vehicle; fall back to any vehicle if needed
+        try:
+            vehicle = Vehicle.objects.filter(user=driver, active=True).first() or \
+                      Vehicle.objects.filter(user=driver).first()
+            if vehicle and vehicle.plate_num:
+                return vehicle.plate_num
+        except Exception:
+            pass
+
         return ""
     
     def get_status(self, obj):
