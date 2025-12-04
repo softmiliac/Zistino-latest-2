@@ -269,9 +269,9 @@ if DEBUG:
 else:
     CORS_ALLOW_ALL_ORIGINS = False
     # در محیط production فقط دامنه‌ی Render اجازه دارد
-    CORS_ALLOWED_ORIGINS = [
-        "https://zistino-latest-2.onrender.com",
-    ]
+    # CORS_ALLOWED_ORIGINS = [
+    #     "https://zistino-latest-2.onrender.com",
+    # ]
 
 CORS_ALLOW_CREDENTIALS = True
 
