@@ -722,13 +722,21 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
         """Update a delivery matching old Swagger format."""
         try:
             delivery = self.get_object()
-            # Drivers can only update their own deliveries
-            if not request.user.is_staff and delivery.driver != request.user:
-                return create_error_response(
-                    error_message='You can only update your own deliveries',
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    errors={'error': ['You can only update your own deliveries']}
-                )
+            # Permission check:
+            # - Staff can update any delivery
+            # - Non-staff drivers can:
+            #   * Update their own deliveries, OR
+            #   * Claim/update deliveries that are still in 'available' status
+            if not request.user.is_staff:
+                if delivery.driver and delivery.driver != request.user and delivery.status != 'available':
+                    return create_error_response(
+                        error_message='You can only update your own deliveries',
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        errors={'error': ['You can only update your own deliveries']}
+                    )
+                # If delivery is unassigned or available, auto-assign it to current driver
+                if (not delivery.driver or delivery.status == 'available') and request.user.is_driver:
+                    delivery.driver = request.user
             
             # Validate input using old Swagger format serializer
             serializer = DriverDeliveryUpdateRequestSerializer(data=request.data)
@@ -961,13 +969,20 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
         """Partially update a delivery matching old Swagger format."""
         try:
             delivery = self.get_object()
-            # Drivers can only update their own deliveries
-            if not request.user.is_staff and delivery.driver != request.user:
-                return create_error_response(
-                    error_message='You can only update your own deliveries',
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    errors={'error': ['You can only update your own deliveries']}
-                )
+            # Permission check similar to full update:
+            # - Staff can update any delivery
+            # - Non-staff drivers can update their own deliveries
+            # - Non-staff drivers can also claim/update 'available' deliveries
+            if not request.user.is_staff:
+                if delivery.driver and delivery.driver != request.user and delivery.status != 'available':
+                    return create_error_response(
+                        error_message='You can only update your own deliveries',
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        errors={'error': ['You can only update your own deliveries']}
+                    )
+                # If delivery is unassigned or available, auto-assign it to current driver
+                if (not delivery.driver or delivery.status == 'available') and request.user.is_driver:
+                    delivery.driver = request.user
             return super().partial_update(request, *args, **kwargs)
         except Delivery.DoesNotExist:
             pk = kwargs.get('id', 'unknown')
