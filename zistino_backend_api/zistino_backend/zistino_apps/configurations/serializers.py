@@ -18,6 +18,19 @@ class ConfigurationSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'type', 'value']
         read_only_fields = ['id']
 
+    def validate(self, attrs):
+        """
+        Ensure that for the special config used by Flutter (name='config'),
+        the type is always forced to 1 (single) regardless of what the client sends.
+        This keeps behaviour consistent for all endpoints using this serializer
+        without affecting other configuration records.
+        """
+        # When updating, name might come from the existing instance
+        name = attrs.get('name') or getattr(self.instance, 'name', None)
+        if name == 'config':
+            attrs['type'] = 1
+        return super().validate(attrs)
+
     def to_representation(self, instance):
         """Convert value JSON to TimeModel structure."""
         data = super().to_representation(instance)
