@@ -64,15 +64,29 @@ class URLImageField(serializers.ImageField):
             # Handle local file paths
             else:
                 try:
+                    print(f'DEBUG URLImageField - Processing local path: {data}')
                     # Try as absolute path first
                     if os.path.isabs(data):
                         file_path = data
+                        print(f'DEBUG URLImageField - Using absolute path: {file_path}')
                     else:
                         # Try relative to MEDIA_ROOT
                         if hasattr(settings, 'MEDIA_ROOT') and settings.MEDIA_ROOT:
+                            print(f'DEBUG URLImageField - MEDIA_ROOT: {settings.MEDIA_ROOT}')
+                            # Remove only /media/ prefix if present (MEDIA_ROOT already includes media/)
+                            # Keep the rest of the path (e.g., uploads/app/image.jpg)
+                            path = data.lstrip('/')
+                            print(f'DEBUG URLImageField - After lstrip: {path}')
                             # Remove 'media/' prefix if present (it's already in MEDIA_ROOT)
-                            path = data.replace('media/', '').lstrip('/')
+                            if path.startswith('media/'):
+                                path = path.replace('media/', '', 1)
+                                print(f'DEBUG URLImageField - After removing media/: {path}')
+                            # Don't remove 'uploads/app/' - keep it as part of the path
+                            # The file should be at MEDIA_ROOT/uploads/app/...
+                            # Remove leading slash if still present
+                            path = path.lstrip('/')
                             file_path = os.path.join(settings.MEDIA_ROOT, path)
+                            print(f'DEBUG URLImageField - Final file_path: {file_path}')
                         else:
                             # Fallback: try relative to project root
                             from django.conf import settings as django_settings
@@ -83,8 +97,11 @@ class URLImageField(serializers.ImageField):
                                 file_path = data
                     
                     # Check if file exists
+                    print(f'DEBUG URLImageField - Checking if file exists: {file_path}')
                     if not os.path.exists(file_path):
-                        raise serializers.ValidationError(f'Image file not found: {data}')
+                        print(f'DEBUG URLImageField - File NOT found: {file_path}')
+                        raise serializers.ValidationError(f'Image file not found: {data} (resolved to: {file_path})')
+                    print(f'DEBUG URLImageField - File found: {file_path}')
                     
                     # Check if it's a file (not a directory)
                     if not os.path.isfile(file_path):
@@ -144,6 +161,7 @@ class CategorySerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     image = URLImageField(required=False, allow_null=True)
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), required=False, allow_null=False)
 
     class Meta:
         model = Product
