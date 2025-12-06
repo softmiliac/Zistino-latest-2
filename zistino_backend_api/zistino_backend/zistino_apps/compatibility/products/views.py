@@ -922,6 +922,12 @@ class ProductsViewSet(viewsets.ModelViewSet):
         """Update a product. Returns format matching old Swagger."""
         instance = self.get_object()
         
+        # Debug: Log raw request data
+        print(f'\n{"="*80}')
+        print(f'DEBUG UPDATE PRODUCT - Raw request.data:')
+        print(f'request.data: {request.data}')
+        print(f'{"="*80}\n')
+        
         # Prepare data with field mappings
         data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
         
@@ -1013,21 +1019,17 @@ class ProductsViewSet(viewsets.ModelViewSet):
                 try:
                     category = Category.objects.get(id=category_id_str)
                 except Category.DoesNotExist:
-                    return create_error_response(
-                        error_message=f'Category with ID "{category_id_str}" does not exist.',
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'category': [f'Invalid category ID "{category_id_str}" - category does not exist.']}
-                    )
+                    # Category not found, will remove from data and keep existing
+                    print(f'DEBUG UPDATE PRODUCT - Category with UUID "{category_id_str}" does not exist, will keep existing category')
             else:
                 try:
                     category_id_int = int(category_id_str)
                     category = find_category_by_hash(category_id_int)
+                    if not category:
+                        print(f'DEBUG UPDATE PRODUCT - Category not found for hash ID: {category_id_int}, will keep existing category')
                 except (ValueError, TypeError):
-                    return create_error_response(
-                        error_message=f'Invalid category ID format: "{category_id_str}". Expected UUID or valid integer hash.',
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        errors={'category': [f'Invalid category ID format. Expected UUID.']}
-                    )
+                    # If conversion fails, just log and continue (will remove invalid category from data)
+                    print(f'DEBUG UPDATE PRODUCT - Invalid category ID format: "{category_id_str}", will keep existing category')
         
         # If category is provided, update it in data
         if category:
@@ -1041,12 +1043,36 @@ class ProductsViewSet(viewsets.ModelViewSet):
                     status_code=status.HTTP_400_BAD_REQUEST,
                     errors={'category': [f'Invalid category ID format. Expected UUID.']}
                 )
+        else:
+            # If category is not found but category_id was provided, remove invalid category from data
+            # This allows partial update to keep existing category from instance
+            if 'category' in data:
+                # Remove invalid category value (like '11' string) from data
+                # Serializer will use existing category from instance
+                del data['category']
+                print(f'DEBUG UPDATE PRODUCT - Removed invalid category from data, will use instance category')
+        
+        # Debug: Log the data being sent to serializer
+        print(f'\n{"="*80}')
+        print(f'DEBUG UPDATE PRODUCT - Data being sent to serializer:')
+        print(f'data: {data}')
+        print(f'instance.id: {instance.id}')
+        print(f'instance.name: {instance.name}')
+        print(f'instance.category: {instance.category.id if instance.category else None}')
+        print(f'{"="*80}\n')
         
         serializer = ProductSerializer(instance, data=data, partial=True)
         if not serializer.is_valid():
             errors = {}
             for field, error_list in serializer.errors.items():
                 errors[field] = [str(error) for error in error_list]
+            
+            # Debug: Log validation errors
+            print(f'\n{"="*80}')
+            print(f'DEBUG UPDATE PRODUCT - Validation errors:')
+            print(f'errors: {errors}')
+            print(f'{"="*80}\n')
+            
             return create_error_response(
                 error_message='Validation failed',
                 status_code=status.HTTP_400_BAD_REQUEST,
