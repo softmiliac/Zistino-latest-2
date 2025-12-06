@@ -56,8 +56,12 @@ const RecycleCategories: FC = () => {
   const updateCategory = useUpdateCategory(selectedCategoryId);
 
   useEffect(() => {
+    console.log('UPLOADED IMAGE CHANGED:', uploadedImage);
     createFormik.setFieldValue("imagePath", uploadedImage);
     updateFormik.setFieldValue("imagePath", uploadedImage);
+    // Verify that imagePath was set
+    console.log('UPLOADED IMAGE - createFormik imagePath after set:', createFormik.values.imagePath);
+    console.log('UPLOADED IMAGE - updateFormik imagePath after set:', updateFormik.values.imagePath);
   }, [uploadedImage]);
 
   // const selectedCategory = categories?.data?.filter(
@@ -78,6 +82,9 @@ const RecycleCategories: FC = () => {
     validateOnChange: false,
     // validationSchema: FaqCategorySchema,
     onSubmit: (values: any) => {
+      console.log('CREATE CATEGORY - Form values:', values);
+      console.log('CREATE CATEGORY - imagePath value:', values.imagePath);
+      
       const data: any = {
         name: values.name,
         description: values.description,
@@ -88,15 +95,21 @@ const RecycleCategories: FC = () => {
         locale: values.locale,
         type: 2,
       };
+      
+      console.log('CREATE CATEGORY - Request data:', data);
+      
       createCategory
         .mutateAsync(data)
-        .then(() => {
+        .then((response) => {
+          console.log('CREATE CATEGORY - Success response:', response);
           document.getElementById("create-category")?.click();
           createFormik.resetForm();
+          setUploadedImage(""); // Reset uploaded image
           // @ts-ignore
           document.getElementById("create-category-type").selectedIndex = "2";
         })
         .catch((err) => {
+          console.error('CREATE CATEGORY - Error:', err);
           /*errorAlert({ title: err?.message })*/
         });
     },
@@ -162,7 +175,36 @@ const RecycleCategories: FC = () => {
         },
       });
 
-      setUploadedImage(res.data.data.path);
+      console.log('IMAGE UPLOAD - Full response:', res.data);
+
+      // Backend returns: { data: [{ fileUrl: "...", ... }], messages: ["..."], succeeded: true }
+      if (res.data?.data && res.data.data.length > 0) {
+        const fileUrl = res.data.data[0].fileUrl;
+        console.log('IMAGE UPLOAD - fileUrl from data:', fileUrl);
+        if (fileUrl) {
+          // Keep /media/ prefix - Django needs it to serve files correctly
+          // Backend will handle the path correctly
+          const imagePath = fileUrl; // Don't remove /media/ prefix
+          console.log('IMAGE UPLOAD - Setting imagePath:', imagePath);
+          setUploadedImage(imagePath);
+        } else {
+          // Fallback: use message if fileUrl not available
+          const messagePath = res.data.messages?.[0];
+          console.log('IMAGE UPLOAD - Using message path:', messagePath);
+          if (messagePath) {
+            const imagePath = messagePath; // Don't remove /media/ prefix
+            console.log('IMAGE UPLOAD - Setting imagePath from message:', imagePath);
+            setUploadedImage(imagePath);
+          }
+        }
+      } else if (res.data?.messages && res.data.messages.length > 0) {
+        // Fallback: use message array
+        const imagePath = res.data.messages[0]; // Don't remove /media/ prefix
+        console.log('IMAGE UPLOAD - Setting imagePath from messages array:', imagePath);
+        setUploadedImage(imagePath);
+      } else {
+        console.warn('IMAGE UPLOAD - No fileUrl or message found in response');
+      }
 
       if (res.status === 200) {
         successAlert({ title: "uploaded" });
@@ -186,10 +228,19 @@ const RecycleCategories: FC = () => {
       title: t("image"),
       dataIndex: "thumbnail",
       render(record) {
+        if (!record) {
+          return <Avatar shape="square" icon={<span>📷</span>} />;
+        }
+        // Handle both /media/ and /uploads/app/ paths
+        const imageUrl = record.startsWith('http') 
+          ? record 
+          : record.startsWith('/') 
+            ? `${APP_BASE_URL}${record}` 
+            : `${APP_BASE_URL}/${record}`;
         return (
-          <>
-            <Avatar src={`${APP_BASE_URL}${record}`} shape="square" />
-          </>
+          <Avatar src={imageUrl} shape="square" onError={(e) => {
+            console.error('Avatar image load error:', imageUrl, e);
+          }} />
         );
       },
     },
