@@ -79,7 +79,7 @@ const Products: FC = () => {
               return String(x.id) === String(categoryId) ||
                 (typeof x.id === 'number' && typeof categoryId === 'number' && x.id === categoryId);
             }
-        );
+          );
           // Return category name if found, otherwise try to get name from parsedValue
           return category?.name || parsedValue[0]?.name || "";
         }
@@ -246,9 +246,14 @@ const Products: FC = () => {
     onSubmit: (values: any) => {
       values.categories = JSON.stringify([{ id: values.category }]);
       values.categoryIds = [values.category];
-      values.imagesList = JSON.stringify([values.masterImage]);
 
-      // Debug: Log what we're sending
+      // Filter out blob URLs from masterImage (blob URLs are temporary and can't be sent to backend)
+      let masterImageValue = values.masterImage;
+      if (masterImageValue && typeof masterImageValue === 'string' && masterImageValue.startsWith('blob:')) {
+        masterImageValue = null; // Don't send blob URLs to backend
+      }
+
+      values.imagesList = JSON.stringify(masterImageValue ? [masterImageValue] : []);
 
       updateProduct
         .mutateAsync(values)
