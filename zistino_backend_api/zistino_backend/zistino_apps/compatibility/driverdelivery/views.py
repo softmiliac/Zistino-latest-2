@@ -150,15 +150,18 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             import uuid
             uuid.UUID(str(pk))
             # Use safe query to avoid errors if column doesn't exist
-            qs = Delivery.objects.filter(id=pk)
+            # Use select_related to avoid N+1 queries when accessing order and order.user
+            qs = Delivery.objects.filter(id=pk).select_related('order', 'order__user', 'driver')
             qs = _apply_status_number_safe_query(qs)
             return qs.get()
         except (Delivery.DoesNotExist, ValueError, TypeError):
             # If UUID parsing fails, try to find by integer hash
             # This is for backward compatibility with integer IDs
             import hashlib
-            # Get all deliveries - use safe query
-            deliveries = _apply_status_number_safe_query(Delivery.objects.all())
+            # Get all deliveries - use safe query with select_related
+            deliveries = _apply_status_number_safe_query(
+                Delivery.objects.all().select_related('order', 'order__user', 'driver')
+            )
             
             for delivery in deliveries:
                 delivery_id_str = str(delivery.id).replace('-', '')
@@ -727,8 +730,28 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             # - Non-staff drivers can:
             #   * Update their own deliveries, OR
             #   * Claim/update deliveries that are still in 'available' status
+            # - Customers can update deliveries for orders they created
             if not request.user.is_staff:
-                if delivery.driver and delivery.driver != request.user and delivery.status != 'available':
+                # Check if user is the customer who created the order
+                # Use select_related in get_object() ensures order and order.user are loaded
+                is_customer_owner = False
+                try:
+                    if delivery.order and hasattr(delivery.order, 'user'):
+                        is_customer_owner = (delivery.order.user == request.user)
+                except (AttributeError, Exception):
+                    # If there's any error accessing order.user, assume not owner
+                    is_customer_owner = False
+                
+                # Check if user is the driver assigned to the delivery
+                is_driver_owner = (delivery.driver == request.user) if delivery.driver else False
+                # Check if delivery is available (can be claimed)
+                is_available = delivery.status == 'available'
+                
+                # Allow update if:
+                # 1. User is the customer who created the order, OR
+                # 2. User is the driver assigned to the delivery, OR
+                # 3. Delivery is available (can be claimed by drivers)
+                if not (is_customer_owner or is_driver_owner or is_available):
                     return create_error_response(
                         error_message='You can only update your own deliveries',
                         status_code=status.HTTP_403_FORBIDDEN,
@@ -1134,10 +1157,16 @@ class DriverDeliveryViewSet(viewsets.ModelViewSet):
             
             # Build query - use safe query to avoid errors if column doesn't exist
             # Note: select_related must be called before only() to work correctly
+            # Filter by user: drivers see their assigned deliveries, customers see their own orders
             if request.user.is_staff:
+                # Staff can see all deliveries
                 qs = Delivery.objects.all()
-            else:
+            elif request.user.is_driver:
+                # Drivers see only deliveries assigned to them
                 qs = Delivery.objects.filter(driver=request.user)
+            else:
+                # Customers see only their own delivery requests (orders they created)
+                qs = Delivery.objects.filter(order__user=request.user)
             
             # Apply select_related first (before only())
             qs = qs.select_related('driver', 'order', 'order__user')
@@ -1406,76 +1435,88 @@ class DriverDeliveryMyRequestsView(APIView):
                     driver_lat = float(latest_location.latitude)
                     driver_lng = float(latest_location.longitude)
             
-            # Get all deliveries (not just assigned to driver) - we'll filter by zone proximity
-            delivery_qs = Delivery.objects.all().select_related('driver', 'order', 'order__user')
+            # Filter deliveries by user: drivers see their assigned deliveries, customers see their own orders
+            if request.user.is_driver:
+                # Drivers see deliveries assigned to them (or available in their zones)
+                # Start with deliveries assigned to this driver
+                delivery_qs = Delivery.objects.filter(driver=request.user).select_related('driver', 'order', 'order__user')
+            else:
+                # Customers see only their own delivery requests (orders they created)
+                delivery_qs = Delivery.objects.filter(order__user=request.user).select_related('driver', 'order', 'order__user')
+            
             # Apply safe query to exclude status_number if column doesn't exist
             delivery_qs = _apply_status_number_safe_query(delivery_qs)
             
-            # Filter deliveries based on zone proximity to driver's location
-            all_items = []
-            from zistino_apps.users.models import Zone
-            from zistino_apps.deliveries.utils import find_zone_for_location
-            
-            # Get all active zones
-            all_zones = Zone.objects.filter(
-                is_active=True,
-                center_latitude__isnull=False,
-                center_longitude__isnull=False
-            )
-            
-            # Find zones near driver's location (if driver has location)
-            nearby_zones = []
-            if driver_lat and driver_lng:
-                for zone in all_zones:
-                    # Check if driver is within zone radius
-                    if zone.contains_point(driver_lat, driver_lng):
-                        nearby_zones.append(zone.id)
-                    else:
-                        # Also include zones within reasonable distance (e.g., 20km)
-                        distance = zone.calculate_distance_km(driver_lat, driver_lng)
-                        if distance is not None and distance <= 20.0:  # 20km threshold
+            # For customers: return their own requests directly (no zone filtering needed)
+            # For drivers: filter by zone proximity to show available deliveries in their area
+            if request.user.is_driver:
+                # Filter deliveries based on zone proximity to driver's location
+                all_items = []
+                from zistino_apps.users.models import Zone
+                from zistino_apps.deliveries.utils import find_zone_for_location
+                
+                # Get all active zones
+                all_zones = Zone.objects.filter(
+                    is_active=True,
+                    center_latitude__isnull=False,
+                    center_longitude__isnull=False
+                )
+                
+                # Find zones near driver's location (if driver has location)
+                nearby_zones = []
+                if driver_lat and driver_lng:
+                    for zone in all_zones:
+                        # Check if driver is within zone radius
+                        if zone.contains_point(driver_lat, driver_lng):
                             nearby_zones.append(zone.id)
-            
-            # Filter deliveries that are in nearby zones (or all if driver has no location)
-            for delivery in delivery_qs:
-                delivery_in_nearby_zone = False
+                        else:
+                            # Also include zones within reasonable distance (e.g., 20km)
+                            distance = zone.calculate_distance_km(driver_lat, driver_lng)
+                            if distance is not None and distance <= 20.0:  # 20km threshold
+                                nearby_zones.append(zone.id)
                 
-                # If driver has location, check zone proximity
-                if driver_lat and driver_lng and nearby_zones:
-                    # Method 1: If delivery has latitude/longitude, find its zone
-                    if delivery.latitude and delivery.longitude:
-                        delivery_zone = find_zone_for_location(
-                            float(delivery.latitude),
-                            float(delivery.longitude)
-                        )
-                        if delivery_zone and delivery_zone.id in nearby_zones:
-                            delivery_in_nearby_zone = True
+                # Filter deliveries that are in nearby zones (or all if driver has no location)
+                for delivery in delivery_qs:
+                    delivery_in_nearby_zone = False
                     
-                    # Method 2: If order has latitude/longitude, use that
-                    if not delivery_in_nearby_zone and delivery.order:
-                        if delivery.order.latitude and delivery.order.longitude:
-                            order_zone = find_zone_for_location(
-                                float(delivery.order.latitude),
-                                float(delivery.order.longitude)
+                    # If driver has location, check zone proximity
+                    if driver_lat and driver_lng and nearby_zones:
+                        # Method 1: If delivery has latitude/longitude, find its zone
+                        if delivery.latitude and delivery.longitude:
+                            delivery_zone = find_zone_for_location(
+                                float(delivery.latitude),
+                                float(delivery.longitude)
                             )
-                            if order_zone and order_zone.id in nearby_zones:
+                            if delivery_zone and delivery_zone.id in nearby_zones:
                                 delivery_in_nearby_zone = True
+                        
+                        # Method 2: If order has latitude/longitude, use that
+                        if not delivery_in_nearby_zone and delivery.order:
+                            if delivery.order.latitude and delivery.order.longitude:
+                                order_zone = find_zone_for_location(
+                                    float(delivery.order.latitude),
+                                    float(delivery.order.longitude)
+                                )
+                                if order_zone and order_zone.id in nearby_zones:
+                                    delivery_in_nearby_zone = True
+                        
+                        # Method 3: If order has zone_id, check if it's in nearby zones
+                        if not delivery_in_nearby_zone and delivery.order:
+                            if hasattr(delivery.order, 'zone_id') and delivery.order.zone_id:
+                                if delivery.order.zone_id in nearby_zones:
+                                    delivery_in_nearby_zone = True
+                    else:
+                        # If driver has no location, show all deliveries assigned to them
+                        delivery_in_nearby_zone = True
                     
-                    # Method 3: If order has zone_id, check if it's in nearby zones
-                    if not delivery_in_nearby_zone and delivery.order:
-                        if hasattr(delivery.order, 'zone_id') and delivery.order.zone_id:
-                            if delivery.order.zone_id in nearby_zones:
-                                delivery_in_nearby_zone = True
-                else:
-                    # If driver has no location, show all deliveries (for testing/fallback)
-                    # In production, you might want to return empty list or require location
-                    delivery_in_nearby_zone = True
+                    if delivery_in_nearby_zone:
+                        all_items.append(delivery)
                 
-                if delivery_in_nearby_zone:
-                    all_items.append(delivery)
-            
-            # Now filter the combined list (deliveries + available orders)
-            qs = all_items
+                # Now filter the combined list (deliveries + available orders)
+                qs = all_items
+            else:
+                # For customers: return their own requests directly (already filtered by order__user)
+                qs = list(delivery_qs)
             
             # Filter by preOrderId if provided (in advancedSearch or as direct field)
             pre_order_id = None
